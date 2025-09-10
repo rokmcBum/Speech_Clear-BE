@@ -1,0 +1,8 @@
+.idea/
+.vscode/
+
+# Python 캐시/컴파일 파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
