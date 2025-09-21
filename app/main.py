@@ -1,7 +1,8 @@
 from fastapi import FastAPI
-from app.controllers import VoiceController
+
+from app.api import voice_router
 
 app = FastAPI(title="Speech Analysis API")
 
 # 라우터 등록
-app.include_router(VoiceController.router)
+app.include_router(voice_router.router)
