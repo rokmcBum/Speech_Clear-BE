@@ -1,6 +1,6 @@
 .idea/
 .vscode/
-
+.DS_store
 # Python 캐시/컴파일 파일
 __pycache__/
 *.pyc
