@@ -1,35 +1,54 @@
+# app/infrastructure/storage/object_storage.py
 import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 IDENTITY_URL = "https://api-identity-infrastructure.nhncloudservice.com/v2.0/tokens"
+TENANT_ID = os.getenv("NHN_TENANT_ID")
+USERNAME = os.getenv("NHN_USERNAME")
+PASSWORD = os.getenv("NHN_PASSWORD")
+STORAGE_URL = os.getenv("NHN_STORAGE_URL")
+CONTAINER = os.getenv("NHN_CONTAINER")
+_token_cache = None
 
 
-def get_token(tenant_id, username, password):
+def get_token():
+    global _token_cache
+    if _token_cache:  # TODO: 만료시간 확인 후 갱신
+        return _token_cache
+
     payload = {
         "auth": {
-            "tenantId": tenant_id,
+            "tenantId": TENANT_ID,
             "passwordCredentials": {
-                "username": username,
-                "password": password
+                "username": USERNAME,
+                "password": PASSWORD
             }
         }
     }
     res = requests.post(IDENTITY_URL, json=payload)
+
     res.raise_for_status()
-    token = res.json()["access"]["token"]["id"]
-    return token
+    _token_cache = res.json()["access"]["token"]["id"]
+    return _token_cache
 
 
-def upload_file(storage_url, token, container, object_name, file_path):
-    url = f"{storage_url}/{container}/{object_name}"
+def upload_file(local_path: str, object_name: str) -> str:
+    url = f"{STORAGE_URL}/{CONTAINER}/{object_name}"
+    token = get_token()
     headers = {"X-Auth-Token": token}
-    with open(file_path, "rb") as f:
+    with open(local_path, "rb") as f:
         res = requests.put(url, headers=headers, data=f)
     res.raise_for_status()
     return url
 
 
-def download_file(storage_url, token, container, object_name, save_path):
-    url = f"{storage_url}/{container}/{object_name}"
+def download_file(object_name: str, save_path: str) -> str:
+    url = f"{STORAGE_URL}/{CONTAINER}/{object_name}"
+    token = get_token()
     headers = {"X-Auth-Token": token}
     res = requests.get(url, headers=headers, stream=True)
     res.raise_for_status()
