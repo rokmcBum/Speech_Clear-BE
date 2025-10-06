@@ -27,7 +27,7 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
         fmt = format_map.get(ext, ext)  # 기본은 그대로
         seg_audio.export(tmp_file.name, format=fmt)
 
-        object_name = f"voices/{voice_id}/segments/seg_{order_no}{ext}"
+        object_name = f"voices/{voice_id}/segments/seg_{order_no}"
         seg_url = upload_file(tmp_file.name, object_name)
 
         met = seg.get("metrics", {})
@@ -58,7 +58,7 @@ def process_voice(db: Session, file: UploadFile):
         tmp_path = tmp.name
 
     # 2. 원본 업로드
-    object_name = f"voices/{uuid.uuid4()}{ext}"
+    object_name = f"voices/{uuid.uuid4()}"
     original_url = upload_file(tmp_path, object_name)
 
     # 3. 분석
