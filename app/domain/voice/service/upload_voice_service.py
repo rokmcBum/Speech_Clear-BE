@@ -13,7 +13,6 @@ from app.utils.feedback_rules import make_feedback
 def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     audio = AudioSegment.from_file(local_path)
     saved_segments = []
-
     for order_no, seg in enumerate(segments, start=1):
         seg_audio = audio[int(seg["start"]*1000):int(seg["end"]*1000)]
         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
@@ -29,7 +28,6 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
 
         object_name = f"voices/{voice_id}/segments/seg_{order_no}"
         seg_url = upload_file(tmp_file.name, object_name)
-
         met = seg.get("metrics", {})
         segment = VoiceSegment(
             voice_id=voice.id,
@@ -43,7 +41,7 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
             rate_wpm=float(met.get("rate_wpm")),
             pause_ratio=float(met.get("pause_ratio")),
             prosody_score=float(met.get("prosody_score")),
-            feedback=make_feedback(met),
+            feedback=make_feedback(seg["words"]),
         )
         db.add(segment)
         saved_segments.append(segment)
@@ -51,20 +49,16 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
 
 
 def process_voice(db: Session, file: UploadFile):
-    # 1. 임시 저장
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file.file.read())
         tmp_path = tmp.name
 
-    # 2. 원본 업로드
     object_name = f"voices/{uuid.uuid4()}"
     original_url = upload_file(tmp_path, object_name)
 
-    # 3. 분석
     analysis = analyze_segments(tmp_path, model_name="turbo", language="ko")
 
-    # 4. DB 저장
     voice = Voice(
         filename=file.filename,
         content_type=file.content_type,
@@ -74,11 +68,9 @@ def process_voice(db: Session, file: UploadFile):
     db.add(voice)
     db.flush()
 
-    # 5. segment 저장
     saved_segments = save_segments_to_storage(tmp_path, voice.id, analysis["segments"], db, voice, ext)
     db.commit()
 
-    # 6. 응답
     return {
         "voice_id": voice.id,
         "original_url": voice.original_url,
