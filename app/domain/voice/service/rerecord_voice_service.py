@@ -1,8 +1,11 @@
-import os, tempfile, uuid
+import os
+import tempfile
+
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.domain.voice.model.voice import VoiceSegment, VoiceSegmentVersion
+from app.domain.voice.service.draw_dB_image_service import draw
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.audio_analyzer import analyze_segments
 from app.utils.feedback_rules import make_feedback
@@ -40,6 +43,7 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile):
     seg_url = upload_file(tmp_path, object_name)
 
     analysis = analyze_segments(tmp_path, model_name="turbo", language="ko")
+    waveform_image = draw(tmp_path)
     met = {}
     word_metrics = []
     text = analysis.get("text", "").strip()
@@ -78,6 +82,7 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile):
         "segment_url": version.segment_url,
         "is_selected": version.is_selected,
         "feedback": version.feedback,
+        "waveform_image": waveform_image,
         "metrics": {
             "dB": version.db,
             "pitch_mean_hz": version.pitch_mean_hz,

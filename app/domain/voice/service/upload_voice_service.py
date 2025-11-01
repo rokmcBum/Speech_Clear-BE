@@ -1,10 +1,14 @@
 # app/domain/voice/service.py
-import os, tempfile, uuid
+import os
+import tempfile
+import uuid
+
 from fastapi import UploadFile
-from sqlalchemy.orm import Session
 from pydub import AudioSegment
+from sqlalchemy.orm import Session
 
 from app.domain.voice.model.voice import Voice, VoiceSegment
+from app.domain.voice.service.draw_dB_image_service import draw
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.audio_analyzer import analyze_segments
 from app.utils.feedback_rules import make_feedback
@@ -14,11 +18,11 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     audio = AudioSegment.from_file(local_path)
     saved_segments = []
     for order_no, seg in enumerate(segments, start=1):
-        seg_audio = audio[int(seg["start"]*1000):int(seg["end"]*1000)]
+        seg_audio = audio[int(seg["start"] * 1000):int(seg["end"] * 1000)]
         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         ext = ext.replace(".", "")
         format_map = {
-            "m4a": "mp4",   # 👈 m4a는 mp4로 매핑
+            "m4a": "mp4",  # 👈 m4a는 mp4로 매핑
             "aac": "adts",
             "wav": "wav",
             "mp3": "mp3"
@@ -59,6 +63,9 @@ def process_voice(db: Session, file: UploadFile):
 
     analysis = analyze_segments(tmp_path, model_name="turbo", language="ko")
 
+    waveform_image = draw(tmp_path)
+
+    # 🔹 DB 저장
     voice = Voice(
         filename=file.filename,
         content_type=file.content_type,
@@ -74,6 +81,7 @@ def process_voice(db: Session, file: UploadFile):
     return {
         "voice_id": voice.id,
         "original_url": voice.original_url,
+        "waveform_image": waveform_image,
         "segments": [
             {
                 "id": seg.id,
