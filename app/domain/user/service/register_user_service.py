@@ -1,5 +1,4 @@
 from fastapi import Form, Depends, HTTPException
-from pydantic import EmailStr
 from requests import Session
 from starlette import status
 
@@ -11,7 +10,7 @@ from app.utils.encryption import encrypt_text, decrypt_text
 
 
 def register_user(name: str = Form(...),
-                  email: EmailStr = Form(...),
+                  email: str = Form(...),
                   password: str = Form(...), db: Session = Depends(get_session)):
     existing = db.query(User).filter(User.email == email).first()
     if existing:
