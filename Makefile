@@ -28,7 +28,3 @@ run:
 initdb:
 	$(DOCKER_COMPOSE) down -v
 	$(DOCKER_COMPOSE) up -d
-
-# 패키지 설치
-install:
-	pip install -r requirements.txt
