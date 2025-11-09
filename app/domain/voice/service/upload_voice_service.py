@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from pydub import AudioSegment
 from sqlalchemy.orm import Session
 
+from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.service.draw_dB_image_service import draw
 from app.infrastructure.storage.object_storage import upload_file
@@ -52,7 +53,7 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     return saved_segments
 
 
-def process_voice(db: Session, file: UploadFile):
+def process_voice(db: Session, file: UploadFile, user: User):
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file.file.read())
@@ -67,6 +68,7 @@ def process_voice(db: Session, file: UploadFile):
 
     # 🔹 DB 저장
     voice = Voice(
+        user_id=user.id,
         filename=file.filename,
         content_type=file.content_type,
         original_url=original_url,
