@@ -54,7 +54,6 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile):
         word_metrics = seg0.get("words", [])
 
     feedback = make_feedback(word_metrics)
-    is_selected = (feedback is None)
 
     version = VoiceSegmentVersion(
         segment_id=seg.id,
@@ -67,7 +66,6 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile):
         pause_ratio=_to_float(met.get("pause_ratio")),
         prosody_score=_to_float(met.get("prosody_score")),
         feedback=feedback,
-        is_selected=is_selected
     )
     db.add(version)
 
@@ -80,7 +78,6 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile):
         "version_no": version.version_no,
         "text": version.text,
         "segment_url": version.segment_url,
-        "is_selected": version.is_selected,
         "feedback": version.feedback,
         "waveform_image": waveform_image,
         "metrics": {
