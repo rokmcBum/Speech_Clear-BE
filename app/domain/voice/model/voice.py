@@ -6,6 +6,8 @@ from app.infrastructure.db.db import Base
 class Voice(Base):
     __tablename__ = "voices"
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    previous_voice_id = Column(Integer, nullable=True)
     filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     original_url = Column(String, nullable=False)
@@ -48,7 +50,6 @@ class VoiceSegmentVersion(Base):
     prosody_score = Column(Float)
     feedback = Column(String)
     created_at = Column(TIMESTAMP, server_default=func.now())
-    is_selected = Column(Boolean, default=False)
 
     segment = relationship("VoiceSegment", back_populates="versions")
 

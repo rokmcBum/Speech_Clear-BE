@@ -1,8 +1,16 @@
--- initdb.sql
+CREATE TABLE IF NOT EXISTS users (
+                                     id SERIAL PRIMARY KEY,
+                                     name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
 
 CREATE TABLE IF NOT EXISTS voices (
-                                      id SERIAL PRIMARY KEY,
-                                      filename VARCHAR(255) NOT NULL,
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    previous_voice_id INT REFERENCES voices(id) ON DELETE SET NULL,
+    filename VARCHAR(255) NOT NULL,
     content_type VARCHAR(100) NOT NULL,
     original_url TEXT NOT NULL,
     duration_sec FLOAT,
@@ -25,12 +33,6 @@ CREATE TABLE IF NOT EXISTS voice_segments (
     feedback TEXT
     );
 
--- 인덱스
-CREATE INDEX IF NOT EXISTS idx_voice_segments_voice_id ON voice_segments(voice_id);
-CREATE INDEX IF NOT EXISTS idx_voice_segments_order_no ON voice_segments(order_no);
-
--- 기존 voices / voice_segments는 그대로 두고, 버전 테이블만 추가
-
 CREATE TABLE IF NOT EXISTS voice_segment_versions (
                                                       id SERIAL PRIMARY KEY,
                                                       segment_id INT NOT NULL REFERENCES voice_segments(id) ON DELETE CASCADE,
@@ -44,18 +46,11 @@ CREATE TABLE IF NOT EXISTS voice_segment_versions (
     prosody_score FLOAT,
     feedback TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_selected BOOLEAN DEFAULT FALSE,
     CONSTRAINT uq_segment_version UNIQUE (segment_id, version_no)
     );
 
--- 조회 최적화
+CREATE INDEX IF NOT EXISTS idx_voice_user_id ON voices(user_id);
+CREATE INDEX IF NOT EXISTS idx_voice_prev_id ON voices(previous_voice_id);
+CREATE INDEX IF NOT EXISTS idx_voice_segments_voice_id ON voice_segments(voice_id);
+CREATE INDEX IF NOT EXISTS idx_voice_segments_order_no ON voice_segments(order_no);
 CREATE INDEX IF NOT EXISTS idx_vsv_segment_id ON voice_segment_versions(segment_id);
-CREATE INDEX IF NOT EXISTS idx_vsv_selected ON voice_segment_versions(segment_id, is_selected);
-
-CREATE TABLE IF NOT EXISTS users (
-     id SERIAL PRIMARY KEY,
-     name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
