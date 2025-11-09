@@ -1,24 +1,29 @@
 import datetime
 import os
 
-import jwt
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.domain.user.model.user import User
 from app.infrastructure.db.db import get_session
 
+load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES"))
 
+bearer_scheme = HTTPBearer()
 
 def get_current_user(
-        authorization: str = Header(None),
+        creds: HTTPAuthorizationCredentials = Depends(bearer_scheme),
         db: Session = Depends(get_session)
 ):
-    if not authorization:
+    Authorization = creds.credentials
+
+    if not Authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization 헤더가 필요합니다.",
@@ -26,7 +31,7 @@ def get_current_user(
         )
 
     # Bearer prefix 제거
-    parts = authorization.split(" ")
+    parts = Authorization.split(" ")
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(status_code=401, detail="잘못된 인증 헤더 형식입니다.")
 
