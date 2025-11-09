@@ -47,10 +47,10 @@ def upload_file(local_path: str, object_name: str) -> str:
 
 
 def download_file(object_name: str, save_path: str) -> str:
-    url = f"{STORAGE_URL}/{CONTAINER}/{object_name}"
+    # url = f"{STORAGE_URL}/{CONTAINER}/{object_name}"
     token = get_token()
     headers = {"X-Auth-Token": token}
-    res = requests.get(url, headers=headers, stream=True)
+    res = requests.get(object_name, headers=headers, stream=True)
     res.raise_for_status()
     with open(save_path, "wb") as f:
         for chunk in res.iter_content(chunk_size=8192):
