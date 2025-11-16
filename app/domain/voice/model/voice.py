@@ -24,6 +24,7 @@ class VoiceSegment(Base):
     voice_id = Column(Integer, ForeignKey("voices.id"))
     order_no = Column(Integer, nullable=False)
     text = Column(String, nullable=False)
+    part = Column(String(50), nullable=True)  # 문단 구분 (서론, 본론1, 본론2, 결론 등)
     start_time = Column(Float)
     end_time = Column(Float)
     segment_url = Column(String)

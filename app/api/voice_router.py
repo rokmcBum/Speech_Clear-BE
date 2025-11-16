@@ -15,11 +15,17 @@ router = APIRouter(
 
 
 @router.post("/analyze")
-async def analyze_voice(file: UploadFile = File(...), db: Session = Depends(get_session), user: User = Depends(get_current_user)):
+async def analyze_voice(
+    file: UploadFile = File(...), 
+    category_id: int = Query(...),
+    db: Session = Depends(get_session), 
+    user: User = Depends(get_current_user)
+):
     """
     음성 파일 업로드 후 분석 → JSON 결과 리턴
+    - LLM을 사용하여 문단별(서론/본론/결론)로 분할
     """
-    result = process_voice(db ,file, user)
+    result = process_voice(db, file, user, category_id)
     return result
 
 

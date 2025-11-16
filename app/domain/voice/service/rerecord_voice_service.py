@@ -5,7 +5,7 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.domain.voice.model.voice import VoiceSegment, VoiceSegmentVersion
-from app.domain.voice.service.draw_dB_image_service import draw
+from app.domain.voice.utils.draw_dB_image import draw
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.audio_analyzer import analyze_segments
 from app.utils.feedback_rules import make_feedback

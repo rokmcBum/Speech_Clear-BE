@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS voice_segments (
                                               voice_id INT NOT NULL REFERENCES voices(id) ON DELETE CASCADE,
     order_no INT NOT NULL,
     text TEXT NOT NULL,
+    part VARCHAR(50),
     start_time FLOAT,
     end_time FLOAT,
     segment_url TEXT,
@@ -66,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_segments_order_no ON voice_segments(order_n
 CREATE INDEX IF NOT EXISTS idx_vsv_segment_id ON voice_segment_versions(segment_id);
 
 -- 테스트 데이터 삽입
--- Users (password는 "test123"의 bcrypt 해시값)
+-- Users 
 INSERT INTO users (id, name, email, password, created_at) VALUES
 (1, 'gAAAAABpGYfcRxIzg1NYff6Lp6AY793InZivw1496jI0P88AZJ150vGAQKp9YNGyB1AbF99KO3FHzgyWerFuiB-MXv8phgd58XKHN9s28cvwzAzjG3j-kNc=', 'test@a.com', '$2b$12$gChCSSqmQ3Fzt.lcOzFdLOAq3pBvCjWxiB/g0z0k/1Lk9MZAmSfcy', '2025-11-16 08:14:20.142')
 ON CONFLICT (id) DO NOTHING;

@@ -9,6 +9,10 @@ from app.infrastructure.storage.object_storage import upload_file, download_file
 
 
 def synthesize_voice(voice_id: int, db: Session, user: User):
+    original_voice = db.query(Voice).filter(Voice.id == voice_id).first()
+    if not original_voice:
+        raise ValueError("해당 음성을 찾을 수 없습니다.")
+    
     voice_segments = (
         db.query(VoiceSegment)
         .filter(VoiceSegment.voice_id == voice_id)
@@ -64,6 +68,7 @@ def synthesize_voice(voice_id: int, db: Session, user: User):
     duration_sec= len(combined) / 1000.0
     synthesized_voice = Voice(
         user_id=user.id,
+        category_id=original_voice.category_id,  
         filename=out_tmp.name,
         content_type="audio/mp4",
         original_url=final_url,
