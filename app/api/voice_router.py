@@ -32,10 +32,9 @@ async def analyze_voice(
 @router.post("/segment/{segment_id}/re_record")
 def re_record(segment_id: int,
               file: UploadFile = File(...),
-              db: Session = Depends(get_session)):
-    result = re_record_segment(db, segment_id, file)
-    if not result:
-        raise HTTPException(status_code=404, detail="Segment not found")
+              db: Session = Depends(get_session),
+              user: User = Depends(get_current_user)):
+    result = re_record_segment(db, segment_id, file, user)
     return result
 
 @router.post("/synthesize/{voice_id}/")

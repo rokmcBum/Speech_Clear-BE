@@ -95,12 +95,14 @@ http://0.0.0.0:8080/docs
     2. LLM으로 문단별(서론/본론/결론) 분할
     3. librosa로 각 문단별 음성 분석
 
-- `POST /voice/segment/{segment_id}/re_record` - 세그먼트 재녹음
+- `POST /voice/segment/{segment_id}/re_record` - 세그먼트 재녹음 (인증 필요)
   - Body: `file` (Multipart file)
   - Returns: 재녹음된 세그먼트 버전 정보
+  - 보안: 현재 사용자가 해당 voice의 소유자인지 검증
 
 - `POST /voice/synthesize/{voice_id}/` - 음성 합성 (인증 필요)
   - Returns: 개선된 최종 음성 파일 (원본과 동일한 카테고리로 저장)
+  - 보안: 현재 사용자가 해당 voice의 소유자인지 검증
 
 ## 🗄️ 데이터베이스 구조
 
@@ -136,6 +138,9 @@ make initdb   # 데이터베이스 초기화
 - 비밀번호는 bcrypt로 해시화되어 저장됩니다
 - JWT 토큰을 사용한 인증 및 인가
 - 민감한 정보는 환경 변수로 관리
+- 리소스 접근 제어: 사용자는 자신이 소유한 voice/segment만 수정 가능
+  - 세그먼트 재녹음 시 voice 소유자 검증
+  - 음성 합성 시 voice 소유자 검증
 
 ## 📝 주요 기능
 

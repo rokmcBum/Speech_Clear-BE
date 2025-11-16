@@ -1,10 +1,12 @@
 import os
 import tempfile
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
+from starlette import status
 
-from app.domain.voice.model.voice import VoiceSegment, VoiceSegmentVersion
+from app.domain.user.model.user import User
+from app.domain.voice.model.voice import VoiceSegment, VoiceSegmentVersion, Voice
 from app.domain.voice.utils.draw_dB_image import draw
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.audio_analyzer import analyze_segments
@@ -28,10 +30,22 @@ def _next_version_no(db: Session, segment_id: int) -> int:
     return (last.version_no + 1) if last else 1
 
 
-def re_record_segment(db: Session, segment_id: int, file: UploadFile):
+def re_record_segment(db: Session, segment_id: int, file: UploadFile, user: User):
     seg = db.query(VoiceSegment).filter(VoiceSegment.id == segment_id).first()
     if not seg:
-        return None
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Segment not found")
+    
+    # voice 조회하여 user_id 검증
+    voice = db.query(Voice).filter(Voice.id == seg.voice_id).first()
+    if not voice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice not found")
+    
+    # 현재 사용자가 해당 voice의 소유자인지 확인
+    if voice.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You do not have permission to re-record this segment"
+        )
 
     ext_with_dot = os.path.splitext(file.filename)[1]  # ".m4a"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext_with_dot) as tmp:
