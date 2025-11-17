@@ -75,9 +75,6 @@ class CompletionExecutor:
 
 
 def classify_text_into_sections(text: str) -> List[Dict[str, Any]]:
-    print("--------------------------------")
-    print(text) 
-    print("--------------------------------")
     """
     텍스트를 LLM을 사용하여 문단별(서론/본론/결론)로 분할합니다.
     
@@ -189,10 +186,6 @@ def classify_text_into_sections(text: str) -> List[Dict[str, Any]]:
     
     if not answer:
         raise ValueError("LLM 응답이 비어있습니다.")
-    
-    print("--------------------------------")
-    print(answer) 
-    print("--------------------------------")
     
     # JSON 파싱 전에 코드블록 제거 및 포맷팅
     cleaned = answer.strip()

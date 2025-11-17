@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException
-from requests import Session
+from sqlalchemy.orm import Session
 
 from app.domain.user.model.user import User
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
@@ -41,5 +41,5 @@ def re_record(segment_id: int,
 def synthesize_speech(voice_id: int,
               db: Session = Depends(get_session),
                       user: User = Depends(get_current_user)):
-    result = synthesize_voice(voice_id, db,user)
+    result = synthesize_voice(voice_id, db, user)
     return result
