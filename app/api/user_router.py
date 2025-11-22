@@ -1,12 +1,13 @@
 import re
 
-from fastapi import Form, Depends, HTTPException, APIRouter
+from fastapi import Form, Depends, HTTPException, APIRouter, Query
 from sqlalchemy.orm import Session
 from starlette import status
 
 from app.domain.user.model.user import User
 from app.domain.user.service.login_user_service import login
 from app.domain.user.service.register_user_service import register_user
+from app.domain.user.service.check_email_service import check_email_availability
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -53,6 +54,31 @@ async def login_user(
         )
 
     return login(email, password, db)
+
+
+@router.get("/check-email")
+async def check_email(
+        email: str = Query(..., description="검증할 이메일 주소"),
+        db: Session = Depends(get_session)
+):
+    """
+    이메일 중복 검증 API
+    - 이메일이 이미 사용 중인지 확인
+    """
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이메일을 입력해주세요."
+        )
+
+    if not re.match(EMAIL_REGEX, email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이메일 형식이 올바르지 않습니다."
+        )
+
+    result = check_email_availability(email, db)
+    return result
 
 
 @router.get("/me")
