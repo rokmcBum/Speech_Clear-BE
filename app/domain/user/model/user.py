@@ -9,4 +9,5 @@ class User(Base):
     name = Column(String, nullable=False)  # 암호화된 값이 길어질 수 있어 TEXT로 변경
     email = Column(String(255), nullable=False, unique=True, index=True)
     password = Column(String(255), nullable=False)
+    gender = Column(String(10), nullable=False)  # 성별 (M, F 등)
     created_at = Column(TIMESTAMP, server_default=func.now())

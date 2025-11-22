@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
                                      name TEXT NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
+    gender VARCHAR(10) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -68,8 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_vsv_segment_id ON voice_segment_versions(segment_
 
 -- 테스트 데이터 삽입
 -- Users 
-INSERT INTO users (id, name, email, password, created_at) VALUES
-(1, 'gAAAAABpGYfcRxIzg1NYff6Lp6AY793InZivw1496jI0P88AZJ150vGAQKp9YNGyB1AbF99KO3FHzgyWerFuiB-MXv8phgd58XKHN9s28cvwzAzjG3j-kNc=', 'test@a.com', '$2b$12$gChCSSqmQ3Fzt.lcOzFdLOAq3pBvCjWxiB/g0z0k/1Lk9MZAmSfcy', '2025-11-16 08:14:20.142')
+INSERT INTO users (id, name, email, password, gender, created_at) VALUES
+(1, 'gAAAAABpGYfcRxIzg1NYff6Lp6AY793InZivw1496jI0P88AZJ150vGAQKp9YNGyB1AbF99KO3FHzgyWerFuiB-MXv8phgd58XKHN9s28cvwzAzjG3j-kNc=', 'test@a.com', '$2b$12$gChCSSqmQ3Fzt.lcOzFdLOAq3pBvCjWxiB/g0z0k/1Lk9MZAmSfcy', 'MALE', '2025-11-16 08:14:20.142')
 ON CONFLICT (id) DO NOTHING;
 
 -- Categories
@@ -77,3 +78,7 @@ INSERT INTO categories (id, user_id, name, created_at) VALUES
 (1, 1, '프레젠테이션', '2025-11-16 08:15:26.658'),
 (2, 1, '회의록', '2025-11-16 08:15:31.122')
 ON CONFLICT (id) DO NOTHING;
+
+-- 시퀀스 업데이트 (테스트 데이터 삽입 후 시퀀스를 최신 상태로 설정)
+SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
+SELECT setval('categories_id_seq', (SELECT MAX(id) FROM categories));
