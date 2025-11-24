@@ -51,6 +51,7 @@ dependencies:
       - jinja2==3.1.6
       - joblib==1.5.2
       - kiwisolver==1.4.9
+      - kss==2.5.2
       - lazy-loader==0.4
       - librosa==0.11.0
       - llvmlite==0.44.0

@@ -3,10 +3,24 @@ import whisper
 import librosa
 import numpy as np
 
+# 한국어 문장 분할 라이브러리 (선택적)
+try:
+    import kss
+    KSS_AVAILABLE = True
+except ImportError:
+    KSS_AVAILABLE = False
+    print("⚠️ kss 라이브러리가 설치되지 않았습니다. 한국어 문장 분할 후처리를 건너뜁니다.")
+
 
 def transcribe_audio(audio_path: str, model_name="turbo", language="ko"):
     """
     Whisper로 음성을 텍스트로 변환합니다. (텍스트 추출만, metrics 계산 없음)
+    문장 분할 성능 향상을 위한 파라미터 최적화 적용
+    
+    Args:
+        audio_path: 오디오 파일 경로
+        model_name: Whisper 모델 이름 (turbo, base, small, medium, large-v3 등)
+        language: 언어 코드 (ko: 한국어)
     
     Returns:
         {
@@ -19,7 +33,25 @@ def transcribe_audio(audio_path: str, model_name="turbo", language="ko"):
         }
     """
     model = whisper.load_model(model_name)
-    result = model.transcribe(audio_path, language=language, word_timestamps=True)
+    
+    # 문장 분할 성능 향상을 위한 파라미터 설정
+    result = model.transcribe(
+        audio_path,
+        language=language,
+        word_timestamps=True,
+        # 이전 텍스트에 의존하지 않아 더 독립적인 문장 분할
+        condition_on_previous_text=False,
+        # 더 일관된 결과를 위한 낮은 temperature
+        temperature=0,
+        # 더 정확한 디코딩을 위한 beam_size
+        beam_size=5,
+        # 최적의 후보 선택
+        best_of=5,
+        # 더 세밀한 문장 분할을 위한 패턴 인식
+        no_speech_threshold=0.6,
+        logprob_threshold=-1.0,
+        compression_ratio_threshold=2.4
+    )
     
     # segments를 간단한 형태로 변환 (metrics 없이)
     segments = []
@@ -43,11 +75,101 @@ def transcribe_audio(audio_path: str, model_name="turbo", language="ko"):
         
         segments.append(segment_info)
     
+    # 한국어 문장 분할 후처리 (kss 사용)
+    if language == "ko" and KSS_AVAILABLE:
+        segments = _refine_korean_segments(segments)
+    
     # duration 계산
     y, sr = librosa.load(audio_path, sr=16000)
     duration = float(len(y) / sr)
     
     return {"text": result["text"], "segments": segments, "duration": duration}
+
+
+def _refine_korean_segments(segments: list) -> list:
+    """
+    한국어 문장 분할을 개선하기 위한 후처리 함수.
+    kss를 사용하여 Whisper segments를 더 정확하게 분할합니다.
+    
+    Args:
+        segments: Whisper segments 리스트
+    
+    Returns:
+        개선된 segments 리스트
+    """
+    if not segments:
+        return segments
+    
+    refined_segments = []
+    
+    for seg in segments:
+        text = seg["text"].strip()
+        if not text:
+            continue
+        
+        # kss로 문장 분할
+        try:
+            sentences = kss.split_sentences(text)
+        except Exception as e:
+            # kss 분할 실패 시 원본 사용
+            print(f"⚠️ kss 문장 분할 실패: {e}, 원본 segment 사용")
+            refined_segments.append(seg)
+            continue
+        
+        # 여러 문장으로 분할된 경우 시간을 비례적으로 분배
+        if len(sentences) > 1:
+            total_duration = seg["end"] - seg["start"]
+            total_chars = len(text.replace(" ", "").replace("\n", "").replace("\t", ""))
+            
+            current_time = seg["start"]
+            accumulated_chars = 0
+            
+            for i, sentence in enumerate(sentences):
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                
+                # 문장의 문자 수 계산 (공백 제외)
+                sentence_chars = len(sentence.replace(" ", "").replace("\n", "").replace("\t", ""))
+                
+                # 문장 길이에 비례하여 시간 계산
+                if total_chars > 0:
+                    sentence_ratio = sentence_chars / total_chars
+                    sentence_duration = total_duration * sentence_ratio
+                else:
+                    sentence_duration = total_duration / len(sentences)
+                
+                # 마지막 문장은 남은 시간 모두 사용
+                if i == len(sentences) - 1:
+                    sentence_end = seg["end"]
+                else:
+                    sentence_end = current_time + sentence_duration
+                
+                # words를 문장 시간 범위에 맞게 필터링
+                sentence_words = []
+                if seg.get("words"):
+                    for word in seg["words"]:
+                        word_start = word.get("start", 0)
+                        word_end = word.get("end", 0)
+                        # 문장 시간 범위 내의 words만 포함
+                        if word_start >= current_time and word_end <= sentence_end:
+                            sentence_words.append(word)
+                
+                refined_segments.append({
+                    "id": seg["id"] if i == 0 else f"{seg['id']}_{i}",
+                    "text": sentence,
+                    "start": current_time,
+                    "end": sentence_end,
+                    "words": sentence_words
+                })
+                
+                current_time = sentence_end
+                accumulated_chars += sentence_chars
+        else:
+            # 문장이 하나면 원본 그대로 사용
+            refined_segments.append(seg)
+    
+    return refined_segments
 
 
 def analyze_segment_audio(audio_path: str, start_time: float, end_time: float, text: str = "", y=None, sr=None):
@@ -132,7 +254,18 @@ def analyze_segments(audio_path: str, model_name="turbo", language="ko"):
     Whisper 분석 + librosa 분석을 함께 수행합니다.
     """
     model = whisper.load_model(model_name)
-    result = model.transcribe(audio_path, language=language, word_timestamps=True)
+    result = model.transcribe(
+        audio_path,
+        language=language,
+        word_timestamps=True,
+        condition_on_previous_text=False,
+        temperature=0,
+        beam_size=5,
+        best_of=5,
+        no_speech_threshold=0.6,
+        logprob_threshold=-1.0,
+        compression_ratio_threshold=2.4
+    )
     y, sr = librosa.load(audio_path, sr=16000)
 
     analyzed = []
