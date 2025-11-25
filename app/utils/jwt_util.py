@@ -30,15 +30,8 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Bearer prefix 제거
-    parts = Authorization.split(" ")
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="잘못된 인증 헤더 형식입니다.")
-
-    token = parts[1]
-
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(Authorization, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id: int = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="잘못된 토큰입니다.")

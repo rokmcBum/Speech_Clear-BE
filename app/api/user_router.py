@@ -1,5 +1,6 @@
 import re
 
+from app.utils.encryption import decrypt_text
 from fastapi import Form, Depends, HTTPException, APIRouter, Query
 from sqlalchemy.orm import Session
 from starlette import status
@@ -85,6 +86,6 @@ async def check_email(
 async def get_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
-        "name": current_user.name,
+        "name": decrypt_text(current_user.name),
         "email": current_user.email
     }
