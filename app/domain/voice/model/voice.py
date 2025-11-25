@@ -9,6 +9,7 @@ class Voice(Base):
     user_id = Column(Integer, nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
     previous_voice_id = Column(Integer, nullable=True)
+    name = Column(String(255), nullable=False)
     filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     original_url = Column(String, nullable=False)

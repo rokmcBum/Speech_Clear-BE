@@ -1,10 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException, Form
 from sqlalchemy.orm import Session
 
 from app.domain.user.model.user import User
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
 from app.domain.voice.service.upload_voice_service import process_voice
+from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -14,18 +15,35 @@ router = APIRouter(
 )
 
 
+@router.get("/list")
+def list_voices(
+    category_id: int = Query(None, description="카테고리 ID (선택적, 없으면 전체 조회)"),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """
+    내 음성 목록 조회 (인증 필요)
+    - category_id가 제공되면 해당 카테고리의 음성만 조회
+    - 없으면 전체 음성 조회
+    """
+    voices = get_my_voices(user, db, category_id)
+    return {"voices": voices}
+
+
 @router.post("/analyze")
 async def analyze_voice(
     file: UploadFile = File(...), 
     category_id: int = Query(...),
+    name: str = Form(...),
     db: Session = Depends(get_session), 
     user: User = Depends(get_current_user)
 ):
     """
     음성 파일 업로드 후 분석 → JSON 결과 리턴
     - LLM을 사용하여 문단별(서론/본론/결론)로 분할
+    - name: 음성 이름
     """
-    result = process_voice(db, file, user, category_id)
+    result = process_voice(db, file, user, category_id, name)
     return result
 
 
