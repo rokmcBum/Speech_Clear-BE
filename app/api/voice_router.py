@@ -1,11 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException, Form
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.domain.category.model.category import Category
 from app.domain.user.model.user import User
+from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
 from app.domain.voice.service.upload_voice_service import process_voice
-from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -33,7 +34,7 @@ def list_voices(
 @router.post("/analyze")
 async def analyze_voice(
     file: UploadFile = File(...), 
-    category_id: int = Query(...),
+    category_id: int = Form(...),
     name: str = Form(...),
     db: Session = Depends(get_session), 
     user: User = Depends(get_current_user)
@@ -43,6 +44,13 @@ async def analyze_voice(
     - LLM을 사용하여 문단별(서론/본론/결론)로 분할
     - name: 음성 이름
     """
+    # category_id가 0이면 기본 카테고리(첫 번째) 할당
+    if category_id == 0:
+        first_category = db.query(Category).filter(Category.user_id == user.id).first()
+        if not first_category:
+            raise HTTPException(status_code=400, detail="생성된 카테고리가 없습니다.")
+        category_id = first_category.id
+
     result = process_voice(db, file, user, category_id, name)
     return result
 

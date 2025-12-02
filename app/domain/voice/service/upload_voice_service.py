@@ -8,15 +8,19 @@ from fastapi import UploadFile
 from pydub import AudioSegment
 from sqlalchemy.orm import Session
 
+from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.draw_dB_image import draw
-from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.voice.utils.map_sections_to_segments import (
-    map_llm_sections_to_sentences_with_timestamps
+    map_llm_sections_to_sentences_with_timestamps,
 )
 from app.infrastructure.storage.object_storage import upload_file
-from app.utils.audio_analyzer import transcribe_audio, analyze_segment_audio, analyze_segments
+from app.utils.audio_analyzer import (
+    analyze_segment_audio,
+    analyze_segments,
+    transcribe_audio,
+)
 from app.utils.feedback_rules import make_feedback
 
 
@@ -70,7 +74,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: int, n
     original_url = upload_file(tmp_path, object_name)
 
     # 1단계: Whisper로 전체 텍스트 + word timestamps 추출 (segments는 신뢰하지 않음)
-    whisper_result = transcribe_audio(tmp_path, model_name="turbo", language="ko")
+    whisper_result = transcribe_audio(tmp_path, model_name="tiny", language="ko")
     full_text = whisper_result["text"]
     word_timestamps = whisper_result.get("words", [])
     
