@@ -7,7 +7,7 @@ class Voice(Base):
     __tablename__ = "voices"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=False)
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=True)
     previous_voice_id = Column(Integer, nullable=True)
     name = Column(String(255), nullable=False)
     filename = Column(String, nullable=False)

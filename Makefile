@@ -20,8 +20,6 @@ logs:
 
 # FastAPI 실행 (로컬 실행)
 run:
-	$(DOCKER_COMPOSE) down -v
-	$(DOCKER_COMPOSE) up -d
 	uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 # DB 초기화 (initdb.sql 반영)

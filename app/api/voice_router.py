@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException, Form
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.domain.user.model.user import User
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
@@ -33,7 +34,7 @@ def list_voices(
 @router.post("/analyze")
 async def analyze_voice(
     file: UploadFile = File(...), 
-    category_id: int = Query(...),
+    category_id: Optional[int] = Form(default=None),
     name: str = Form(...),
     db: Session = Depends(get_session), 
     user: User = Depends(get_current_user)
@@ -42,7 +43,11 @@ async def analyze_voice(
     음성 파일 업로드 후 분석 → JSON 결과 리턴
     - LLM을 사용하여 문단별(서론/본론/결론)로 분할
     - name: 음성 이름
+    - category_id: 카테고리 ID (선택적, 0이면 NULL로 저장)
     """
+    # category_id가 0이거나 None이면 None으로 변환
+    if category_id == 0 or category_id is None:
+        category_id = None
     result = process_voice(db, file, user, category_id, name)
     return result
 

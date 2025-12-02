@@ -52,7 +52,7 @@ def get_my_voices(user: User, db: Session, category_id: int = None):
             "id": voice.id,
             "name": voice.name,
             "category_id": voice.category_id,
-            "category_name": voice.category.name if voice.category else None,
+            "category_name": voice.category.name if voice.category else "모든 speech",
             "original_url": voice.original_url,
             "duration_sec": voice.duration_sec,
             "segments_count": segments_count,

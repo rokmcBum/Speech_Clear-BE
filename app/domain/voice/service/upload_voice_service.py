@@ -7,6 +7,7 @@ import librosa
 from fastapi import UploadFile
 from pydub import AudioSegment
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
@@ -60,7 +61,7 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     return saved_segments
 
 
-def process_voice(db: Session, file: UploadFile, user: User, category_id: int, name: str):
+def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str):
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file.file.read())

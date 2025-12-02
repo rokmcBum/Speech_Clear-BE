@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE TABLE IF NOT EXISTS voices (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  category_id INT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  category_id INT REFERENCES categories(id) ON DELETE CASCADE,
     previous_voice_id INT REFERENCES voices(id) ON DELETE SET NULL,
     name VARCHAR(255) NOT NULL,
     filename VARCHAR(255) NOT NULL,
