@@ -25,6 +25,10 @@ progress_store: Dict[int, int] = {}
 @router.get("/progress/{user_id}")
 async def get_progress(user_id: int):
     async def event_generator():
+        # 연결 시 기존에 100%인 상태라면 초기화 (새로운 요청으로 간주)
+        if progress_store.get(user_id) == 100:
+            progress_store[user_id] = 0
+            
         while True:
             progress = progress_store.get(user_id, 0)
             yield f"data: {progress}\n\n"
@@ -77,11 +81,17 @@ async def analyze_voice(
     # 초기화
     progress_store[user.id] = 0
     
+    # 파일을 미리 읽어서 바이트로 변환 (스레드에서 UploadFile 객체 접근 시 문제 발생 가능)
+    file_content = await file.read()
+    
+    # 동기 함수인 process_voice를 별도 스레드에서 실행하여 이벤트 루프 차단 방지
+    loop = asyncio.get_event_loop()
     try:
-        result = process_voice(db, file, user, category_id, name, progress_callback=update_progress)
+        result = await loop.run_in_executor(
+            None, 
+            lambda: process_voice(db, file, user, category_id, name, progress_callback=update_progress, file_content=file_content)
+        )
     finally:
-        # 완료 후 정리 (선택적, 클라이언트가 100%를 받을 시간 여유를 위해 바로 삭제하지 않거나, 
-        # SSE 연결이 끊길 때까지 유지할 수도 있음. 여기서는 100% 도달 후 SSE가 끊기도록 둠)
         pass
         
     return result

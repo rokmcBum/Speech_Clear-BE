@@ -65,12 +65,15 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     return saved_segments
 
 
-def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str, progress_callback=None):
+def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str, progress_callback=None, file_content: bytes = None):
     if progress_callback:
         progress_callback(10) # 시작: 10%
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(file.file.read())
+        if file_content:
+            tmp.write(file_content)
+        else:
+            tmp.write(file.file.read())
         tmp_path = tmp.name
 
     object_name = f"voices/{uuid.uuid4()}"
