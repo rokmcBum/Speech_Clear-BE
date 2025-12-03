@@ -2,25 +2,30 @@
 import os
 import tempfile
 import uuid
+from typing import Optional
 
 import librosa
 from fastapi import UploadFile
 from pydub import AudioSegment
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from app.domain.llm.service import make_feedback_service
 from app.domain.llm.service.stt_service import make_voice_to_stt
+from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.draw_dB_image import draw
-from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.voice.utils.map_sections_to_segments import (
-    map_llm_sections_to_sentences_with_timestamps
+    map_llm_sections_to_sentences_with_timestamps,
 )
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.analyzer_function import compute_energy_stats_segment, compute_final_boundary_features_for_segment, compute_pitch_cv_segment, get_voiced_mask_from_words
 from app.utils.audio_analyzer import transcribe_audio, analyze_segment_audio, analyze_segments
+from app.utils.audio_analyzer import (
+    analyze_segment_audio,
+    analyze_segments,
+    transcribe_audio,
+)
 from app.utils.feedback_rules import make_feedback
 
 import numpy as np
@@ -71,10 +76,16 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
         saved_segments.append(segment)
     return saved_segments
 
-def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str):
+
+def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str, progress_callback=None, file_content: bytes = None):
+    if progress_callback:
+        progress_callback(10) # 시작: 10%
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(file.file.read())
+        if file_content:
+            tmp.write(file_content)
+        else:
+            tmp.write(file.file.read())
         tmp_path = tmp.name
 
     object_name = f"voices/{uuid.uuid4()}"
@@ -85,6 +96,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     full_text = clova_result["text"]
     clova_segments = clova_result.get("segments", [])
     
+    if progress_callback:
+        progress_callback(30) # Whisper 완료: 30%
     # 2단계: LLM으로 문단별 분할 (part 정보를 위해)
     llm_sections_list = []  # (section_text, part) 튜플 리스트
     try:
@@ -99,7 +112,10 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     except Exception as e:
         print(f"⚠️ LLM 분할 실패: {e}")
     
-    # 3단계: Clova Speech segments에 part 정보 추가
+    if progress_callback:
+        progress_callback(50) # LLM 완료: 50%
+
+        # 3단계: Clova Speech segments에 part 정보 추가
     final_segments = []
     for seg in clova_segments:
         seg_text = seg.get("text", "").strip()
@@ -150,7 +166,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         
         final_segments.append(final_seg)
 
-    print(final_segments)
+    
     # 3단계: 나뉜 문장별로 librosa로 분석하여 metrics 계산
     # 오디오를 한 번만 로드하여 성능 최적화
     # -------------------------------------------------------
@@ -181,7 +197,6 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     frame_times = (frame_idx * hop_length + hop_length / 2.0) / sr
 
 
-    print(final_segments)
     # STT 결과 기반 유성 마스크 생성
     full_voice_masked = get_voiced_mask_from_words(rms, sr, hop_length, final_segments)
     
@@ -302,14 +317,16 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                         "duration_sec": round(duration, 3)
                     }
                 })
-
+        if progress_callback:
+            current_progress = 50 + int((id + 1) / len(final_segments) * 40)
+            progress_callback(current_progress)  
         analyzed.append(segment_info)
 
     feedbacks_list = make_feedback_service.make_feedback(analyzed)
 
     # 피드백을 segment_index로 매핑
     feedback_map = {fb["segment_index"]: fb["feedback"] for fb in feedbacks_list}
-    
+        # 진행률 업데이트 (50% ~ 90% 사이)
     # Voice 생성 및 저장
     voice = Voice(
         user_id=user.id,
@@ -377,7 +394,10 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         saved_segments.append(segment)
     
     db.commit()
-    
+
+    if progress_callback:
+        progress_callback(100) # 완료: 100%
+
     return {
         "voice_id": voice.id,
         "original_url": voice.original_url,

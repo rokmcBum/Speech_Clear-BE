@@ -1,8 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, Depends, Query, HTTPException, Form
-from sqlalchemy.orm import Session
-from typing import Optional
+import asyncio
+from typing import Dict, Optional
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.domain.category.model.category import Category
 from app.domain.user.model.user import User
+from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
 from app.domain.voice.service.upload_voice_service import process_voice
@@ -15,6 +20,24 @@ router = APIRouter(
     prefix="/voice",
     tags=["voice"]
 )
+
+# 진행률 저장소 (user_id -> progress percentage)
+progress_store: Dict[int, int] = {}
+
+@router.get("/progress/{user_id}")
+async def get_progress(user_id: int):
+    async def event_generator():
+        # 연결 시 기존에 100%인 상태라면 초기화 (새로운 요청으로 간주)
+        if progress_store.get(user_id) == 100:
+            progress_store[user_id] = 0
+            
+        while True:
+            progress = progress_store.get(user_id, 0)
+            yield f"data: {progress}\n\n"
+            if progress >= 100:
+                break
+            await asyncio.sleep(0.5)
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/list")
@@ -46,10 +69,33 @@ async def analyze_voice(
     - name: 음성 이름
     - category_id: 카테고리 ID (선택적, 0이면 NULL로 저장)
     """
-    # category_id가 0이거나 None이면 None으로 변환
-    if category_id == 0 or category_id is None:
-        category_id = None
-    result = process_voice(db, file, user, category_id, name)
+    # category_id가 0이면 기본 카테고리(첫 번째) 할당
+    if category_id == 0:
+        first_category = db.query(Category).filter(Category.user_id == user.id).first()
+        if not first_category:
+            raise HTTPException(status_code=400, detail="생성된 카테고리가 없습니다.")
+        category_id = first_category.id
+
+    # 진행률 콜백 함수
+    def update_progress(percentage: int):
+        progress_store[user.id] = percentage
+
+    # 초기화
+    progress_store[user.id] = 0
+    
+    # 파일을 미리 읽어서 바이트로 변환 (스레드에서 UploadFile 객체 접근 시 문제 발생 가능)
+    file_content = await file.read()
+    
+    # 동기 함수인 process_voice를 별도 스레드에서 실행하여 이벤트 루프 차단 방지
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, 
+            lambda: process_voice(db, file, user, category_id, name, progress_callback=update_progress, file_content=file_content)
+        )
+    finally:
+        pass
+        
     return result
 
 
