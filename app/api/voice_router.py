@@ -5,7 +5,7 @@ from typing import Optional
 from app.domain.user.model.user import User
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
-from app.domain.voice.service.upload_voice_service import process_voice
+from app.domain.voice.service.upload_voice_service import process_voice, process_voice2
 from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
@@ -51,6 +51,26 @@ async def analyze_voice(
     result = process_voice(db, file, user, category_id, name)
     return result
 
+
+@router.post("/analyze2")
+async def analyze_voice2(
+    file: UploadFile = File(...), 
+    category_id: Optional[int] = Form(default=None),
+    name: str = Form(...),
+    db: Session = Depends(get_session), 
+    user: User = Depends(get_current_user)
+):
+    """
+    음성 파일 업로드 후 분석 → JSON 결과 리턴
+    - LLM을 사용하여 문단별(서론/본론/결론)로 분할
+    - name: 음성 이름
+    - category_id: 카테고리 ID (선택적, 0이면 NULL로 저장)
+    """
+    # category_id가 0이거나 None이면 None으로 변환
+    if category_id == 0 or category_id is None:
+        category_id = None
+    result = process_voice2(db, file, user, category_id, name)
+    return result
 
 @router.post("/segment/{segment_id}/re_record")
 def re_record(segment_id: int,
