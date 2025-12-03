@@ -5,8 +5,9 @@ from typing import Optional
 from app.domain.user.model.user import User
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
-from app.domain.voice.service.upload_voice_service import process_voice, process_voice2
+from app.domain.voice.service.upload_voice_service import process_voice
 from app.domain.voice.service.get_my_voices_service import get_my_voices
+from app.domain.voice.service.get_voice_service import get_voice
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -65,4 +66,20 @@ def synthesize_speech(voice_id: int,
               db: Session = Depends(get_session),
                       user: User = Depends(get_current_user)):
     result = synthesize_voice(voice_id, db, user)
+    return result
+
+
+@router.get("/{voice_id}")
+def get_voice_detail(
+    voice_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """
+    단일 voice 상세 조회
+    - part별로 그룹화된 segments 반환
+    - 각 segment에 0.1초마다의 dB_list 포함
+    - category_id가 NULL이면 category_name은 "모든 speeches"
+    """
+    result = get_voice(voice_id, db, user)
     return result
