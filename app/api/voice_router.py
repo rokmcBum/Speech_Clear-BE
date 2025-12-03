@@ -69,13 +69,8 @@ async def analyze_voice(
     - name: 음성 이름
     - category_id: 카테고리 ID (선택적, 0이면 NULL로 저장)
     """
-    # category_id가 0이면 기본 카테고리(첫 번째) 할당
-    if category_id == 0:
-        first_category = db.query(Category).filter(Category.user_id == user.id).first()
-        if not first_category:
-            raise HTTPException(status_code=400, detail="생성된 카테고리가 없습니다.")
-        category_id = first_category.id
-
+    if category_id == 0 or category_id is None:
+        category_id = None
     # 진행률 콜백 함수
     def update_progress(percentage: int):
         progress_store[user.id] = percentage
