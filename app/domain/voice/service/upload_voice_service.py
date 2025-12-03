@@ -5,13 +5,14 @@ import uuid
 from typing import Optional
 
 import librosa
+import numpy as np
 from fastapi import UploadFile
 from pydub import AudioSegment
 from sqlalchemy.orm import Session
 
 from app.domain.llm.service import make_feedback_service
-from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.llm.service.classify_text_service import classify_text_into_sections
+from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.draw_dB_image import draw
@@ -19,16 +20,18 @@ from app.domain.voice.utils.map_sections_to_segments import (
     map_llm_sections_to_sentences_with_timestamps,
 )
 from app.infrastructure.storage.object_storage import upload_file
-from app.utils.analyzer_function import compute_energy_stats_segment, compute_final_boundary_features_for_segment, compute_pitch_cv_segment, get_voiced_mask_from_words
-from app.utils.audio_analyzer import transcribe_audio, analyze_segment_audio, analyze_segments
+from app.utils.analyzer_function import (
+    compute_energy_stats_segment,
+    compute_final_boundary_features_for_segment,
+    compute_pitch_cv_segment,
+    get_voiced_mask_from_words,
+)
 from app.utils.audio_analyzer import (
     analyze_segment_audio,
     analyze_segments,
     transcribe_audio,
 )
 from app.utils.feedback_rules import make_feedback
-
-import numpy as np
 
 
 def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
@@ -318,7 +321,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                     }
                 })
         if progress_callback:
-            current_progress = 50 + int((id + 1) / len(final_segments) * 40)
+            current_progress = 50 + int(id / len(final_segments) * 40)
             progress_callback(current_progress)  
         analyzed.append(segment_info)
 
