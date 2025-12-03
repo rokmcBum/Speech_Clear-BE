@@ -71,7 +71,6 @@ def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
         saved_segments.append(segment)
     return saved_segments
 
-
 def process_voice(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str):
     ext = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
@@ -87,7 +86,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     clova_segments = clova_result.get("segments", [])
     
     # 2단계: LLM으로 문단별 분할 (part 정보를 위해)
-    llm_part_map = {}  # 텍스트 -> part 매핑
+    llm_sections_list = []  # (section_text, part) 튜플 리스트
     try:
         llm_sections = classify_text_into_sections(full_text)
         for item in llm_sections:
@@ -95,9 +94,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 for section in item["sections"]:
                     section_text = section.get("content", "").strip()
                     section_part = section.get("part", "")
-                    if section_text:
-                        # 텍스트의 앞부분으로 매핑
-                        llm_part_map[section_text[:50]] = section_part
+                    if section_text and section_part:
+                        llm_sections_list.append((section_text, section_part))
     except Exception as e:
         print(f"⚠️ LLM 분할 실패: {e}")
     
@@ -106,170 +104,36 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     for seg in clova_segments:
         seg_text = seg.get("text", "").strip()
         
-        # LLM part 정보 매칭
+        # LLM part 정보 매칭 (더 정확한 매칭)
         part = None
-        for key, value in llm_part_map.items():
-            if key in seg_text or seg_text[:50] in key:
-                part = value
-                break
-        
-        # Clova Speech segments 원본 형태 유지 (start, end는 밀리초, words는 배열)
-        final_seg = {
-            "start": seg.get("start", 0),  # 밀리초
-            "end": seg.get("end", 0),      # 밀리초
-            "text": seg_text,
-            "confidence": seg.get("confidence", 0.0),
-            "words": seg.get("words", []),  # [start_ms, end_ms, text] 형태
-            "textEdited": seg.get("textEdited", seg_text)
-        }
-        
-        if part:
-            final_seg["part"] = part
-        
-        final_segments.append(final_seg)
-    
-    # 3단계: 나뉜 문장별로 librosa로 분석하여 metrics 계산
-    # 오디오를 한 번만 로드하여 성능 최적화
-    y_audio, sr_audio = librosa.load(tmp_path, sr=16000)
-    
-    segments_with_metrics = []
-    for seg in final_segments:
-        # Clova Speech segments는 밀리초 단위이므로 초로 변환
-        seg_start_sec = seg["start"] / 1000.0
-        seg_end_sec = seg["end"] / 1000.0
-        
-        metrics = analyze_segment_audio(
-            tmp_path,
-            seg_start_sec,
-            seg_end_sec,
-            seg["text"],
-            y=y_audio,
-            sr=sr_audio
-        )
-        
-        # words에 metrics 추가 (feedback 계산용)
-        # words는 [start_ms, end_ms, text] 형태
-        words_with_metrics = []
-        for word in seg.get("words", []):
-            if isinstance(word, list) and len(word) >= 3:
-                word_start_ms = word[0]
-                word_end_ms = word[1]
-                word_text = word[2]
-                word_start_sec = word_start_ms / 1000.0
-                word_end_sec = word_end_ms / 1000.0
+        if llm_sections_list:
+            # 텍스트 유사도 기반 매칭 (공통 단어 수)
+            best_match_score = 0
+            best_match_part = None
+            
+            for section_text, section_part in llm_sections_list:
+                # 공백 제거 후 비교
+                seg_text_normalized = seg_text.replace(" ", "").replace(".", "").replace(",", "")
+                section_text_normalized = section_text.replace(" ", "").replace(".", "").replace(",", "")
                 
-                word_metrics = analyze_segment_audio(
-                    tmp_path,
-                    word_start_sec,
-                    word_end_sec,
-                    y=y_audio,
-                    sr=sr_audio
-                )
-                words_with_metrics.append({
-                    "text": word_text,
-                    "start": word_start_sec,
-                    "end": word_end_sec,
-                    "metrics": word_metrics
-                })
-        
-        # Clova Speech segments 원본 형태 유지하면서 metrics 추가
-        segments_with_metrics.append({
-            "start": seg["start"],  # 밀리초 (원본 유지)
-            "end": seg["end"],      # 밀리초 (원본 유지)
-            "text": seg["text"],
-            "confidence": seg.get("confidence", 0.0),
-            "words": seg.get("words", []),  # [start_ms, end_ms, text] 형태 (원본 유지)
-            "textEdited": seg.get("textEdited", seg["text"]),
-            "part": seg.get("part"),
-            "metrics": metrics,
-            "words_with_metrics": words_with_metrics  # 분석용 words (초 단위)
-        })
-    
-    segments_to_save = segments_with_metrics
-
-    waveform_image = draw(tmp_path)
-
-    # 🔹 DB 저장
-    voice = Voice(
-        user_id=user.id,
-        category_id=category_id,
-        name=name,
-        filename=file.filename,
-        content_type=file.content_type,
-        original_url=original_url,
-        duration_sec=clova_result.get("duration")
-    )
-    db.add(voice)
-    db.flush()
-
-    saved_segments = save_segments_to_storage(tmp_path, voice.id, segments_to_save, db, voice, ext)
-    db.commit()
-
-    return {
-        "voice_id": voice.id,
-        "original_url": voice.original_url,
-        "waveform_image": waveform_image,
-        "segments": [
-            {
-                "id": seg.id,
-                "order_no": seg.order_no,
-                "text": seg.text,
-                "part": seg.part,
-                "start": seg.start_time,
-                "end": seg.end_time,
-                "segment_url": seg.segment_url,
-                "feedback": seg.feedback,
-                "metrics": {
-                    "dB": seg.db,
-                    "pitch_mean_hz": seg.pitch_mean_hz,
-                    "rate_wpm": seg.rate_wpm,
-                    "pause_ratio": seg.pause_ratio,
-                    "prosody_score": seg.prosody_score,
-                }
-            } for seg in saved_segments
-        ]
-    }
-
-def process_voice2(db: Session, file: UploadFile, user: User, category_id: Optional[int], name: str):
-    ext = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(file.file.read())
-        tmp_path = tmp.name
-
-    object_name = f"voices/{uuid.uuid4()}"
-    original_url = upload_file(tmp_path, object_name)
-
-    clova_result = make_voice_to_stt(tmp_path)
-    print(clova_result)
-    full_text = clova_result["text"]
-    clova_segments = clova_result.get("segments", [])
-    
-    # 2단계: LLM으로 문단별 분할 (part 정보를 위해)
-    llm_part_map = {}  # 텍스트 -> part 매핑
-    try:
-        llm_sections = classify_text_into_sections(full_text)
-        for item in llm_sections:
-            if "sections" in item:
-                for section in item["sections"]:
-                    section_text = section.get("content", "").strip()
-                    section_part = section.get("part", "")
-                    if section_text:
-                        # 텍스트의 앞부분으로 매핑
-                        llm_part_map[section_text[:50]] = section_part
-    except Exception as e:
-        print(f"⚠️ LLM 분할 실패: {e}")
-    
-    # 3단계: Clova Speech segments에 part 정보 추가
-    final_segments = []
-    for seg in clova_segments:
-        seg_text = seg.get("text", "").strip()
-        
-        # LLM part 정보 매칭
-        part = None
-        for key, value in llm_part_map.items():
-            if key in seg_text or seg_text[:50] in key:
-                part = value
-                break
+                # 부분 문자열 매칭
+                if seg_text_normalized in section_text_normalized or section_text_normalized in seg_text_normalized:
+                    # 매칭 길이 계산
+                    match_length = min(len(seg_text_normalized), len(section_text_normalized))
+                    if match_length > best_match_score:
+                        best_match_score = match_length
+                        best_match_part = section_part
+                
+                # 공통 단어 기반 매칭
+                seg_words = set(seg_text.split())
+                section_words = set(section_text.split())
+                common_words = seg_words & section_words
+                if len(common_words) >= 2:  # 최소 2개 단어 이상 공통
+                    if len(common_words) > best_match_score:
+                        best_match_score = len(common_words)
+                        best_match_part = section_part
+            
+            part = best_match_part
         
         # Clova Speech segments 원본 형태 유지 (start, end는 밀리초, words는 배열)
         final_seg = {
@@ -321,10 +185,6 @@ def process_voice2(db: Session, file: UploadFile, user: User, category_id: Optio
     # STT 결과 기반 유성 마스크 생성
     full_voice_masked = get_voiced_mask_from_words(rms, sr, hop_length, final_segments)
     
-    print("full_voice_masked----------")
-    print(full_voice_masked)
-    print("full_voice_masked----------")
-
     result_text = ""
     analyzed = []
     id=0
@@ -416,7 +276,7 @@ def process_voice2(db: Session, file: UploadFile, user: User, category_id: Optio
 
                 # --- dB
                 w_rms = librosa.feature.rms(y=y_word)
-                db = float(np.mean(librosa.amplitude_to_db(w_rms, ref=1.0)))
+                db_value = float(np.mean(librosa.amplitude_to_db(w_rms, ref=1.0)))
 
                 # --- pitch
                 w_f0, _, _ = librosa.pyin(
@@ -436,7 +296,7 @@ def process_voice2(db: Session, file: UploadFile, user: User, category_id: Optio
                     "start": w_start,
                     "end": w_end,
                     "metrics": {
-                        "dB": round(db, 2),
+                        "dB": round(db_value, 2),
                         "pitch_mean_hz": round(pitch_mean, 2),
                         "pitch_std_hz": round(pitch_std, 2),
                         "duration_sec": round(duration, 3)
@@ -445,7 +305,99 @@ def process_voice2(db: Session, file: UploadFile, user: User, category_id: Optio
 
         analyzed.append(segment_info)
 
-    feedback = make_feedback_service.make_feedback(analyzed)
-    print("feedback----------")
-    print(feedback)
-    print("feedback----------")
+    feedbacks_list = make_feedback_service.make_feedback(analyzed)
+
+    # 피드백을 segment_index로 매핑
+    feedback_map = {fb["segment_index"]: fb["feedback"] for fb in feedbacks_list}
+    
+    # Voice 생성 및 저장
+    voice = Voice(
+        user_id=user.id,
+        category_id=category_id,
+        name=name,
+        filename=file.filename,
+        content_type=file.content_type,
+        original_url=original_url,
+        duration_sec=clova_result.get("duration")
+    )
+    db.add(voice)
+    db.flush()
+    
+    # 세그먼트 저장 (object storage + DB)
+    audio = AudioSegment.from_file(tmp_path)
+    saved_segments = []
+    
+    for order_no, (seg, analyzed_seg) in enumerate(zip(final_segments, analyzed), start=1):
+        # Clova Speech segments는 밀리초 단위
+        seg_start_ms = seg["start"]  # 밀리초
+        seg_end_ms = seg["end"]      # 밀리초
+        
+        # Object storage에 세그먼트 저장
+        seg_audio = audio[seg_start_ms:seg_end_ms]
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+        ext_clean = ext.replace(".", "")
+        format_map = {
+            "m4a": "mp4",
+            "aac": "adts",
+            "wav": "wav",
+            "mp3": "mp3"
+        }
+        fmt = format_map.get(ext_clean, ext_clean)
+        seg_audio.export(tmp_file.name, format=fmt)
+        
+        object_name = f"voices/{voice.id}/segments/seg_{order_no}"
+        seg_url = upload_file(tmp_file.name, object_name)
+        
+        # 피드백 가져오기 (segment_index는 0부터 시작, order_no는 1부터 시작)
+        segment_index = order_no - 1
+        feedback_text = feedback_map.get(segment_index, "")
+        
+        # DB에 저장 (analyzed_seg의 정보 사용)
+        energy = analyzed_seg.get("energy", {})
+        pitch = analyzed_seg.get("pitch", {})
+        wpm = analyzed_seg.get("wpm", {})
+        
+        # 기존 DB 구조에 맞게 변환
+        segment = VoiceSegment(
+            voice_id=voice.id,
+            order_no=order_no,
+            text=seg["text"],
+            part=seg.get("part"),
+            start_time=float(analyzed_seg["start"]),  # 초 단위
+            end_time=float(analyzed_seg["end"]),      # 초 단위
+            segment_url=seg_url,
+            db=float(energy.get("mean_rms", 0.0)),  # mean_rms를 dB로 사용
+            pitch_mean_hz=float(pitch.get("mean_hz", 0.0)),
+            rate_wpm=float(wpm.get("rate_wpm", 0.0)),
+            pause_ratio=0.0,  # 새로운 구조에는 없음
+            prosody_score=0.0,  # 새로운 구조에는 없음
+            feedback=feedback_text,
+        )
+        db.add(segment)
+        saved_segments.append(segment)
+    
+    db.commit()
+    
+    return {
+        "voice_id": voice.id,
+        "original_url": voice.original_url,
+        "segments": [
+            {
+                "id": seg.id,
+                "order_no": seg.order_no,
+                "text": seg.text,
+                "part": seg.part,
+                "start": seg.start_time,
+                "end": seg.end_time,
+                "segment_url": seg.segment_url,
+                "feedback": seg.feedback,
+                "metrics": {
+                    "dB": seg.db,
+                    "pitch_mean_hz": seg.pitch_mean_hz,
+                    "rate_wpm": seg.rate_wpm,
+                    "pause_ratio": seg.pause_ratio,
+                    "prosody_score": seg.prosody_score,
+                }
+            } for seg in saved_segments
+        ]
+    }
