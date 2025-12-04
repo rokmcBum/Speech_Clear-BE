@@ -104,87 +104,81 @@ def _calculate_sentence_timestamps_from_clova_words(
     if not sentence or not clova_words:
         return None
     
-    # 문장 텍스트 정규화 (공백 제거)
-    sentence_normalized = sentence.replace(" ", "").replace("\n", "").replace("\t", "")
-    
     # 문장의 단어 리스트
     sentence_words_list = sentence.split()
     if not sentence_words_list:
         return None
     
     # Clova words에서 문장에 해당하는 words 찾기
-    sentence_words = []
+    # 문장의 모든 단어를 순차적으로 매칭하는 방식 사용
     word_start_idx = -1
     word_end_idx = -1
     
-    # 첫 단어와 마지막 단어로 매칭 시작
-    first_word = sentence_words_list[0].strip()
-    last_word = sentence_words_list[-1].strip()
+    # 문장의 단어들을 정규화 (공백, 구두점 제거)
+    sentence_words_normalized = [
+        word.strip().replace(".", "").replace(",", "").replace("!", "").replace("?", "")
+        for word in sentence_words_list
+    ]
     
-    # 첫 단어 찾기 (min_start_time 이후부터 검색)
+    # min_start_time 이후부터 시작하는 인덱스 찾기
+    start_search_idx = 0
     for i, word_info in enumerate(clova_words):
-        word_start_time = word_info.get("start", 0.0)
+        if word_info.get("start", 0.0) >= min_start_time:
+            start_search_idx = i
+            break
+    
+    # 문장의 단어들을 순차적으로 매칭
+    sent_word_idx = 0  # 문장 내 현재 단어 인덱스
+    consecutive_matches = 0  # 연속 매칭 횟수
+    best_match_start = -1
+    best_match_end = -1
+    best_consecutive = 0
+    
+    for i in range(start_search_idx, len(clova_words)):
+        if sent_word_idx >= len(sentence_words_normalized):
+            break
         
-        # min_start_time 이전의 word는 건너뛰기
-        if word_start_time < min_start_time:
-            continue
+        clova_word = clova_words[i]
+        clova_text = clova_word.get("text", "").strip()
+        clova_text_normalized = clova_text.replace(".", "").replace(",", "").replace("!", "").replace("?", "")
         
-        word_text = word_info.get("text", "").strip()
-        word_text_normalized = word_text.replace(" ", "").replace(".", "").replace(",", "")
-        first_word_normalized = first_word.replace(" ", "").replace(".", "").replace(",", "")
+        target_word = sentence_words_normalized[sent_word_idx]
         
-        # 첫 단어 매칭
-        if word_start_idx == -1:
-            if first_word_normalized in word_text_normalized or word_text_normalized in first_word_normalized:
+        # 단어 매칭 (부분 문자열 또는 완전 일치)
+        if (target_word in clova_text_normalized or 
+            clova_text_normalized in target_word or
+            target_word == clova_text_normalized):
+            
+            if word_start_idx == -1:
                 word_start_idx = i
-                break
-    
-    # 마지막 단어 찾기 (첫 단어 이후부터)
-    if word_start_idx != -1:
-        for i in range(word_start_idx, len(clova_words)):
-            word_info = clova_words[i]
-            word_text = word_info.get("text", "").strip()
-            word_text_normalized = word_text.replace(" ", "").replace(".", "").replace(",", "")
-            last_word_normalized = last_word.replace(" ", "").replace(".", "").replace(",", "")
+            word_end_idx = i
+            consecutive_matches += 1
+            sent_word_idx += 1
             
-            # 마지막 단어 매칭
-            if last_word_normalized in word_text_normalized or word_text_normalized in last_word_normalized:
-                word_end_idx = i
-                # 문장의 대부분 단어가 포함되었는지 확인
-                matched_words = 0
-                for j in range(word_start_idx, i + 1):
-                    clova_word_text = clova_words[j].get("text", "").strip()
-                    for sent_word in sentence_words_list:
-                        if sent_word.strip() in clova_word_text or clova_word_text in sent_word.strip():
-                            matched_words += 1
-                            break
+            # 최고 연속 매칭 업데이트
+            if consecutive_matches > best_consecutive:
+                best_consecutive = consecutive_matches
+                best_match_start = word_start_idx
+                best_match_end = word_end_idx
+        else:
+            # 매칭 실패 시 연속 매칭 리셋
+            if consecutive_matches > 0:
+                # 이전까지의 매칭이 최고 기록이면 저장
+                if consecutive_matches > best_consecutive:
+                    best_consecutive = consecutive_matches
+                    best_match_start = word_start_idx
+                    best_match_end = word_end_idx
                 
-                # 문장 단어의 50% 이상 매칭되면 유효
-                if matched_words >= len(sentence_words_list) * 0.5:
-                    break
+                # 현재 단어부터 다시 시작
+                consecutive_matches = 0
+                word_start_idx = -1
+                word_end_idx = -1
+                sent_word_idx = 0
     
-    # 매칭 실패 시 더 관대한 방법 시도
-    if word_start_idx == -1 or word_end_idx == -1:
-        # 문장의 모든 단어를 순차적으로 찾기 (min_start_time 이후부터)
-        word_idx = 0
-        for i, word_info in enumerate(clova_words):
-            if word_idx >= len(sentence_words_list):
-                break
-            
-            word_start_time = word_info.get("start", 0.0)
-            
-            # min_start_time 이전의 word는 건너뛰기
-            if word_start_time < min_start_time:
-                continue
-            
-            word_text = word_info.get("text", "").strip()
-            target_word = sentence_words_list[word_idx].strip()
-            
-            if target_word in word_text or word_text in target_word:
-                if word_start_idx == -1:
-                    word_start_idx = i
-                word_end_idx = i
-                word_idx += 1
+    # 최고 매칭 결과 사용
+    if best_match_start != -1 and best_match_end != -1:
+        word_start_idx = best_match_start
+        word_end_idx = best_match_end
     
     # 최종 검증
     if word_start_idx == -1 or word_end_idx == -1 or word_start_idx > word_end_idx:
