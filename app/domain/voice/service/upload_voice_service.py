@@ -17,7 +17,7 @@ from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.draw_dB_image import draw
 from app.domain.voice.utils.map_sections_to_segments import (
-    map_llm_sections_to_sentences_with_timestamps,
+    split_llm_sections_into_sentences_with_clova_timestamps,
 )
 from app.infrastructure.storage.object_storage import upload_file
 from app.utils.analyzer_function import (
@@ -97,77 +97,51 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     clova_result = make_voice_to_stt(tmp_path)
     print(clova_result)
     full_text = clova_result["text"]
-    clova_segments = clova_result.get("segments", [])
+    clova_words = clova_result.get("words", [])  # Clova Speech의 word timestamps
     
     if progress_callback:
-        progress_callback(30) # Whisper 완료: 30%
+        progress_callback(30) # Clova Speech 완료: 30%
+    
     # 2단계: LLM으로 문단별 분할 (part 정보를 위해)
-    llm_sections_list = []  # (section_text, part) 튜플 리스트
+    llm_sections = []
     try:
         llm_sections = classify_text_into_sections(full_text)
-        for item in llm_sections:
-            if "sections" in item:
-                for section in item["sections"]:
-                    section_text = section.get("content", "").strip()
-                    section_part = section.get("part", "")
-                    if section_text and section_part:
-                        llm_sections_list.append((section_text, section_part))
     except Exception as e:
         print(f"⚠️ LLM 분할 실패: {e}")
     
     if progress_callback:
         progress_callback(50) # LLM 완료: 50%
 
-        # 3단계: Clova Speech segments에 part 정보 추가
+    # 3단계: LLM 문단을 kss로 문장 단위로 분할하고 Clova word timestamps로 시간 계산
     final_segments = []
-    for seg in clova_segments:
-        seg_text = seg.get("text", "").strip()
+    try:
+        sentence_segments = split_llm_sections_into_sentences_with_clova_timestamps(
+            llm_sections=llm_sections,
+            clova_words=clova_words
+        )
         
-        # LLM part 정보 매칭 (더 정확한 매칭)
-        part = None
-        if llm_sections_list:
-            # 텍스트 유사도 기반 매칭 (공통 단어 수)
-            best_match_score = 0
-            best_match_part = None
-            
-            for section_text, section_part in llm_sections_list:
-                # 공백 제거 후 비교
-                seg_text_normalized = seg_text.replace(" ", "").replace(".", "").replace(",", "")
-                section_text_normalized = section_text.replace(" ", "").replace(".", "").replace(",", "")
-                
-                # 부분 문자열 매칭
-                if seg_text_normalized in section_text_normalized or section_text_normalized in seg_text_normalized:
-                    # 매칭 길이 계산
-                    match_length = min(len(seg_text_normalized), len(section_text_normalized))
-                    if match_length > best_match_score:
-                        best_match_score = match_length
-                        best_match_part = section_part
-                
-                # 공통 단어 기반 매칭
-                seg_words = set(seg_text.split())
-                section_words = set(section_text.split())
-                common_words = seg_words & section_words
-                if len(common_words) >= 2:  # 최소 2개 단어 이상 공통
-                    if len(common_words) > best_match_score:
-                        best_match_score = len(common_words)
-                        best_match_part = section_part
-            
-            part = best_match_part
-        
-        # Clova Speech segments 원본 형태 유지 (start, end는 밀리초, words는 배열)
-        final_seg = {
-            "start": seg.get("start", 0),  # 밀리초
-            "end": seg.get("end", 0),      # 밀리초
-            "text": seg_text,
-            "confidence": seg.get("confidence", 0.0),
-            "words": seg.get("words", []),  # [start_ms, end_ms, text] 형태
-            "textEdited": seg.get("textEdited", seg_text)
-        }
-        
-        if part:
-            final_seg["part"] = part
-        
-        final_segments.append(final_seg)
+        # 문장 단위 segments를 final_segments에 추가
+        for seg in sentence_segments:
+            final_seg = {
+                "start": seg.get("start", 0),  # 밀리초
+                "end": seg.get("end", 0),      # 밀리초
+                "text": seg.get("text", "").strip(),
+                "words": seg.get("words", []),  # [start_ms, end_ms, text] 형태
+                "part": seg.get("part")  # part 정보
+            }
+            final_segments.append(final_seg)
+    except Exception as e:
+        print(f"⚠️ 문장 분할 실패: {e}, Clova segments를 그대로 사용")
+        # 실패 시 Clova segments를 그대로 사용 (fallback)
+        clova_segments = clova_result.get("segments", [])
+        for seg in clova_segments:
+            final_seg = {
+                "start": seg.get("start", 0),
+                "end": seg.get("end", 0),
+                "text": seg.get("text", "").strip(),
+                "words": seg.get("words", []),
+            }
+            final_segments.append(final_seg)
 
     
     # 3단계: 나뉜 문장별로 librosa로 분석하여 metrics 계산
