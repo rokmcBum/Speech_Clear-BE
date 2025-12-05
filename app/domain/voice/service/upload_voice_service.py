@@ -210,13 +210,17 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 f0_min=1e-3
             )
             
-            # 문장 끝 경계 특징 계산
-            final_db_drop, final_db_slope, final_pitch_drop, final_pitch_slope = compute_final_boundary_features_for_segment(
-                rms=rms,
-                f0_hz=f0,
-                frame_times=frame_times,
-                seg_start=seg_start,
-                seg_end=seg_end
+            # segment 프레임 시간 (초)
+            seg_frame_idx = np.arange(rms[y_seg].shape[0])
+            seg_frame_times = (seg_frame_idx * hop_length + hop_length / 2.0) / sr
+
+            # segment에 대한 문장 끝 경계 특징 계산
+            final_rms_ratio, final_rms_slope, final_pitch_semitone_drop, final_pitch_semitone_slope = compute_final_boundary_features_for_segment(
+                rms=rms[y_seg],
+                f0_hz=f0[y_seg],
+                voice_masked=full_voice_masked[y_seg],
+                frame_times=seg_frame_times,
+                seg_length=seg_end-seg_start
             )
 
             # 말하기 속도 계산 (wpm)
@@ -236,8 +240,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 "cv": round(cv_energy, 4)
             },
             "pitch": {
-                "mean_hz": round(mean_st, 2),
-                "std_hz": round(std_st, 2),
+                "mean_st": round(mean_st, 2),
+                "std_st": round(std_st, 2),
                 "cv": round(cv_pitch, 4)
             },
             "wpm":{
@@ -246,10 +250,10 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 "duration_sec": round(seg_end - seg_start, 3)
             },
             "final_boundary": {
-                "final_db_drop": round(final_db_drop, 2),
-                "final_db_slope": round(final_db_slope, 4),
-                "final_pitch_drop_semitone": round(final_pitch_drop, 2),
-                "final_pitch_slope": round(final_pitch_slope, 4)
+                "final_rms_ratio": round(final_rms_ratio, 2),
+                "final_rms_slope": round(final_rms_slope, 4),
+                "final_pitch_semitone_drop": round(final_pitch_semitone_drop, 2),
+                "final_pitch_semitone_slope": round(final_pitch_semitone_slope, 4)
             },
             "words" : []
         }
