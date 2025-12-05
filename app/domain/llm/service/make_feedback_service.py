@@ -22,6 +22,7 @@ def make_feedback(segments:list):
             "pitch_ending": {},
             "rate_level": {}
         }
+        need_feedback = False
 
         # CV 값 기반 레이블링
         # 1. Volume Stability
@@ -31,6 +32,9 @@ def make_feedback(segments:list):
             "label": label,
             "comment": comment
         }
+        # 피드백 필요한지 여부 체크
+        if label != "NORMAL_VAR":
+            need_feedback = True
 
         # 2. Pitch Stability
         cv_pitch = seg["pitch"]["cv"]
@@ -39,6 +43,8 @@ def make_feedback(segments:list):
             "label": label,
             "comment": comment
         }
+        if label != "NORMAL_VAR":
+            need_feedback = True 
 
         # 3. Rate Level
         rate_level = seg["wpm"]["rate_wpm"]
@@ -47,36 +53,45 @@ def make_feedback(segments:list):
             "label": label,
             "comment": comment
         }
+        if label != "TYPICAL":
+            need_feedback = True
 
         # 4. Ending Pattern - Energy
-        final_db_drop = seg["final_boundary"]["final_db_drop"]
-        final_db_slope = seg["final_boundary"]["final_db_slope"]
-        vol_end_label, vol_end_comment = classify_volume_ending(final_db_drop, final_db_slope)
+        final_rms_ratio = seg["final_boundary"]["final_rms_ratio"]
+        final_rms_slope = seg["final_boundary"]["final_rms_slope"]
+        vol_end_label, vol_end_comment = classify_volume_ending(final_rms_ratio, final_rms_slope)
         analyzed["ending_pattern"]= {
             "label": vol_end_label,
             "comment": vol_end_comment
         }
+        if vol_end_label not in {"VOL_END_NATURAL_SOFT","VOL_END_STABLE_CLEAR"}:
+            need_feedback = True
 
         # 5. Ending Pattern - Pitch
-        final_pitch_drop = seg["final_boundary"]["final_pitch_drop_semitone"]
-        final_pitch_slope = seg["final_boundary"]["final_pitch_slope"]
-        pitch_end_label, pitch_end_comment = classify_pitch_ending(final_pitch_drop, final_pitch_slope)
+        final_pitch_semitone_drop = seg["final_boundary"]["final_pitch_semitone_drop"]
+        final_pitch_semitone_slope = seg["final_boundary"]["final_pitch_semitone_slope"]
+        pitch_end_label, pitch_end_comment = classify_pitch_ending(final_pitch_semitone_drop, final_pitch_semitone_slope)
         analyzed["pitch_ending"] = {
             "label": pitch_end_label,
             "comment": pitch_end_comment
         }
+        if pitch_end_label not in {"PITCH_END_NATURAL_DECLARATIVE",
+                                    "PITCH_END_FLAT_NEUTRAL", 
+                                    "PITCH_END_STRONG_DECLARATIVE"}:
+            need_feedback = True
 
         # print(analyzed)
         # LLM 피드백 생성
-        feedback = get_sentence_feedback_from_LLM(analyzed)
-        print()
-        print("=== LLM Feedback ===")
-        print(feedback)
+        if need_feedback:
+            feedback = get_sentence_feedback_from_LLM(analyzed)
+        else:
+            feedback = None
         results_feedback.append({
             "segment_index": index,
             "start_time": seg["start"],
             "end_time": seg["end"],
-            "feedback": feedback
+            "feedback": feedback,
+            "needs_feedback": need_feedback
         })
         index += 1
     
