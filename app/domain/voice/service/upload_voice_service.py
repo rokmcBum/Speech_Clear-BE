@@ -25,6 +25,7 @@ from app.utils.analyzer_function import (
     compute_final_boundary_features_for_segment,
     compute_pitch_cv_segment,
     get_voiced_mask_from_words,
+    make_part_index_map
 )
 from app.utils.audio_analyzer import (
     analyze_segment_audio,
@@ -231,6 +232,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         # 문장 단위 정보 구성
         segment_info ={
             "id": id,
+            "part": seg["part"],
             "text": seg_text,
             "start": seg_start,
             "end": seg_end,
@@ -303,7 +305,9 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             progress_callback(current_progress)  
         analyzed.append(segment_info)
 
-    feedbacks_list = make_feedback_service.make_feedback(analyzed)
+    paragraph_index = make_part_index_map(final_segments)
+
+    feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback(analyzed, paragraph_index)
 
     # 피드백을 segment_index로 매핑
     feedback_map = {fb["segment_index"]: fb["feedback"] for fb in feedbacks_list}

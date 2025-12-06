@@ -1,4 +1,31 @@
+from typing import List, Dict, Any
 import numpy as np
+
+# ===== 공통 유틸 함수들 =====
+def make_part_index_map(segments: list):
+    part_ranges = {}
+    current_part = None
+    start_idx = 0
+
+    for idx, seg in enumerate(segments):
+        part = seg.get("part")
+
+        if current_part is None:
+            # 첫 파트 시작
+            current_part = part
+            start_idx = idx
+        elif part != current_part:
+            # 파트가 바뀌면 구간 저장
+            part_ranges[current_part] = [start_idx, idx - 1]
+            # 새 파트 시작
+            current_part = part
+            start_idx = idx
+
+    # 마지막 파트도 저장
+    if current_part is not None:
+        part_ranges[current_part] = [start_idx, len(segments) - 1]
+
+    return part_ranges
 
 # ===== 공통: 유성(발화) 마스크 생성 =====
 def get_voiced_mask_from_words(rms: np.ndarray,
@@ -186,8 +213,10 @@ def compute_final_boundary_features_for_segment(
     rms_final = rms[final_masked]
     rms_final_frame_times = frame_times[final_masked]
 
-    mean_rms_base = _safe_mean(rms_base)
-    mean_rms_final = _safe_mean(rms_final)
+    # mean_rms_base = _safe_mean(rms_base)
+    # mean_rms_final = _safe_mean(rms_final)
+    mean_rms_base = float(np.median(rms_base))
+    mean_rms_final = float(np.median(rms_final))
 
     # dB drop 계산
     if np.isnan(mean_rms_base) or np.isnan(mean_rms_final) or mean_rms_base <= 0:
@@ -250,13 +279,13 @@ def classify_pitch_cv(cv_pitch: float):
     if not np.isfinite(cv_pitch):
         return "UNKNOWN", "유성 구간이 너무 짧거나 피치 측정이 불안정해서 음높이 변동을 평가하기 어렵습니다."
 
-    if cv_pitch < 0.18:
+    if cv_pitch < 0.15:
         label = "LOW_VAR"
         comment = (
             "음높이 변동이 상당히 적은 편입니다. 전체적으로 단조롭게 들릴 수 있어서, "
             "강조해야 하는 단어나 문장에서는 피치를 조금 더 올리거나 내려 주면 전달력이 좋아질 수 있습니다."
         )
-    elif cv_pitch <= 0.40:
+    elif cv_pitch <= 0.50:
         label = "NORMAL_VAR"
         comment = ""
     else:
@@ -274,14 +303,14 @@ def classify_energy_cv(cv_energy: float):
     if not np.isfinite(cv_energy):
         return "UNKNOWN", "유성 구간이 너무 짧거나 RMS 측정이 불안정해서 크기 변동을 평가하기 어렵습니다."
 
-    if cv_energy < 0.30:
+    if cv_energy < 0.25:
         label = "LOW_VAR"
         comment = (
             "음성 크기 변동이 상당히 작은 편입니다. 전체적으로 안정적이지만, "
             "강조해야 할 단어나 문장에서 볼륨 차이가 부족해 다소 단조롭게 들릴 수 있습니다. "
             "핵심 키워드에서만 살짝 크기를 올려 주면 더 전달력이 좋아질 수 있습니다."
         )
-    elif cv_energy <= 0.80:
+    elif cv_energy <= 1.00:
         label = "NORMAL_VAR"
         comment = ""
     else:
@@ -300,13 +329,13 @@ def classify_rate_wpm(rate_wpm: float):
     if not np.isfinite(rate_wpm):
         return "UNKNOWN", "말하기 속도를 평가하기 어렵습니다."
     
-    if rate_wpm < 110:
+    if rate_wpm < 100:
         label = "SLOW"
         comment = (
             "차분하고 또렷하지만 전반적으로 느린 편. 이해하기 쉬운 속도이지만, 에너지가 낮거나 "
             "흐름이 단조롭게 느껴질 수 있음. 중요한 발표에서는 강조 포인트에서 속도 조절이 필요함."
         )
-    elif rate_wpm < 160:
+    elif rate_wpm < 190:
         label = "TYPICAL"
         comment = ""
     else:
@@ -322,54 +351,71 @@ def classify_rate_wpm(rate_wpm: float):
 # ===== 5-1. labeling =====
 def labeling_volume_ending(rms_ratio: float,
                            rms_slope: float):
-    # --- drop 라벨: final_mean / base_mean 비율 사용 ---
+    """
+    rms_ratio : final_mean / base_mean (linear RMS)
+    rms_slope : final 구간 RMS 선형값 기울기 (amp/sec) - 현재는 참고용
+    """
+    # --- drop 라벨: 비율만 사용해서 매우 단순화 ---
     if not np.isfinite(rms_ratio):
         drop_label = "DP_UNKNOWN"
-    elif rms_ratio >= 1.4:
-        drop_label = "DP_RISE"
-    elif rms_ratio >= 0.7:
-        drop_label = "DP_STABLE"
-    elif rms_ratio >= 0.4:
-        drop_label = "DP_SOFT_FALL"
-    else:
+    elif rms_ratio <= 0.5:
+        # 약 -6 dB 이상 떨어짐 -> 강한 페이드 아웃
         drop_label = "DP_STRONG_FALL"
+    elif rms_ratio <= 0.8:
+        # 약 -6 ~ -2 dB 사이 -> 자연스러운 소프트 페이드
+        drop_label = "DP_SOFT_FALL"
+    elif rms_ratio < 1.25:
+        # 약 -2 ~ +2 dB 안쪽 -> 거의 유지
+        drop_label = "DP_STABLE"
+    else:
+        # +2 dB 이상 -> 말끝이 분명히 커짐
+        drop_label = "DP_RISE"
 
-    # --- slope 라벨: RMS 선형값 기울기 (amp/sec) ---
+    # --- slope 라벨: 지금은 세밀하게 쓰지 않고, 기본 정보만 남김 ---
     if not np.isfinite(rms_slope):
         slope_label = "SLOPE_UNKNOWN"
-    elif rms_slope <= -0.01:
+    elif rms_slope <= -0.03:
         slope_label = "SLOPE_DECAY"
-    elif rms_slope < 0.01:
-        slope_label = "SLOPE_FLAT"
-    else:
+    elif rms_slope >= 0.03:
         slope_label = "SLOPE_RISE"
+    else:
+        slope_label = "SLOPE_FLAT"
 
     return drop_label, slope_label
 
 def labeling_pitch_ending(pitch_drop: float,
                           pitch_slope: float):
+    """
+    pitch_drop : baseline mean - final mean (semitone)
+                 양수면 말끝에서 Pitch가 내려간 것
+    pitch_slope: final 구간에서의 기울기 (st/sec) - 참고용
+    """
 
-    # drop 라벨
+    # drop 라벨 (drop 중심, slope는 크게 안 씀)
     if not np.isfinite(pitch_drop):
         drop_label = "PITCH_DROP_UNKNOWN"
-    elif pitch_drop <= -2:
+    elif pitch_drop <= -1.5:
+        # final이 baseline보다 1.5 st 이상 높음 -> 질문/열린 느낌
         drop_label = "PITCH_STRONG_RISE"
     elif pitch_drop < 1.5:
+        # +/- 1.5 st 안쪽 -> 거의 평탄 or 약간의 흔들림
         drop_label = "PITCH_RISE_OR_FLAT"
-    elif pitch_drop < 4:
+    elif pitch_drop < 4.5:
+        # 1.5 ~ 4.5 st 하강 -> 자연스러운 진술형 하강
         drop_label = "PITCH_NATURAL_FALL"
     else:
+        # 4.5 st 이상 하강 -> 강한 종결감
         drop_label = "PITCH_STRONG_FALL"
 
-    # slope 라벨
+    # slope 라벨 (강한 질문/강한 하강 보정용 정도로만 사용 가능)
     if not np.isfinite(pitch_slope):
         slope_label = "PITCH_SLOPE_UNKNOWN"
-    elif pitch_slope <= -0.5:
+    elif pitch_slope <= -3.0:
         slope_label = "PITCH_SLOPE_FALL"
-    elif pitch_slope < 0.5:
-        slope_label = "PITCH_SLOPE_FLAT"
-    else:
+    elif pitch_slope >= 3.0:
         slope_label = "PITCH_SLOPE_RISE"
+    else:
+        slope_label = "PITCH_SLOPE_FLAT"
 
     return drop_label, slope_label
 
@@ -386,26 +432,13 @@ def classify_volume_ending(final_db_drop: float,
     # 기본값
     final_label = "VOL_END_MIXED"
 
-    # 1) 강한 페이드 아웃 (볼륨 확 줄어듦)
-    if (db_drop_label == "DP_STRONG_FALL"
-        and db_slope_label == "SLOPE_DECAY"):
+    if db_drop_label == "DP_STRONG_FALL":
         final_label = "VOL_END_STRONG_FADE"
-
-    # 2) 자연스럽게 부드럽게 줄어드는 마무리
-    elif ((db_drop_label in {"DP_SOFT_FALL", "DP_STABLE"}
-           and db_slope_label == "SLOPE_DECAY")
-          or (db_drop_label == "DP_SOFT_FALL"
-              and db_slope_label == "SLOPE_FLAT")):
+    elif db_drop_label == "DP_SOFT_FALL":
         final_label = "VOL_END_NATURAL_SOFT"
-
-    # 3) 끝까지 또렷하게 유지되는 마무리
-    elif (db_drop_label == "DP_STABLE"
-          and db_slope_label == "SLOPE_FLAT"):
+    elif db_drop_label == "DP_STABLE":
         final_label = "VOL_END_STABLE_CLEAR"
-
-    # 4) 끝으로 갈수록 볼륨이 올라가는 패턴
-    elif (db_drop_label == "DP_RISE"
-          or db_slope_label == "SLOPE_RISE"):
+    elif db_drop_label == "DP_RISE":
         final_label = "VOL_END_RISING"
 
     comments = {
@@ -445,24 +478,20 @@ def classify_pitch_ending(final_pitch_drop: str,
     # 기본값
     final_label = "PITCH_END_MIXED"
 
-    # 1) 질문형/열린 느낌 (끝에서 올라가거나 유지)
-    if (pitch_drop_label == "PITCH_STRONG_RISE"
-        or pitch_slope_label == "PITCH_SLOPE_RISE"):
+    # 1) 질문형/열린 느낌 (끝에서 확실히 올라가거나 유지)
+    if pitch_drop_label == "PITCH_STRONG_RISE":
         final_label = "PITCH_END_QUESTION_LIKE"
 
     # 2) 강한 종결감 / 단호한 마무리
-    elif (pitch_drop_label == "PITCH_STRONG_FALL"
-          and pitch_slope_label == "PITCH_SLOPE_FALL"):
+    elif pitch_drop_label == "PITCH_STRONG_FALL":
         final_label = "PITCH_END_STRONG_DECLARATIVE"
 
     # 3) 자연스러운 진술형 종결
-    elif (pitch_drop_label == "PITCH_NATURAL_FALL"
-          and pitch_slope_label in {"PITCH_SLOPE_FLAT", "PITCH_SLOPE_FALL"}):
+    elif pitch_drop_label == "PITCH_NATURAL_FALL":
         final_label = "PITCH_END_NATURAL_DECLARATIVE"
 
     # 4) 평탄·중립적인 마무리
-    elif (pitch_drop_label == "PITCH_RISE_OR_FLAT"
-          and pitch_slope_label == "PITCH_SLOPE_FLAT"):
+    elif pitch_drop_label == "PITCH_RISE_OR_FLAT":
         final_label = "PITCH_END_FLAT_NEUTRAL"
 
     comments = {
@@ -490,3 +519,141 @@ def classify_pitch_ending(final_pitch_drop: str,
     }
 
     return final_label, comments[final_label]
+
+# ===== 6. 문장별 라벨을 이용한 문단 피드백 생성 =====
+def _ratio(count: int, total: int) -> float:
+    return count / total if total > 0 else 0.0
+
+def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """
+    matrix_5x5 구조:
+      row 0: volume_stability  [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
+      row 1: volume_pattern    [STABLE_CLEAR, NATURAL_SOFT, STRONG_FADE, RISING, MIXED]
+      row 2: pitch_stability   [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
+      row 3: pitch_ending      [QUESTION_LIKE, FLAT_NEUTRAL, NATURAL_DECL, STRONG_DECL, MIXED]
+      row 4: rate_level        [SLOW, TYPICAL, FAST, UNKNOWN, _]
+    """
+    paragraph_labelings = []
+    for item in paragraph_stats:
+        part = item["part"]
+        mat  = item["matrix"]
+
+        # 1) volume_stability → stable / moderate / unstable
+        vs = mat[0]
+        vs_total = sum(vs[:3])  # LOW, NORMAL, HIGH만
+        vs_low, vs_norm, vs_high = vs[0], vs[1], vs[2]
+
+        r_low = _ratio(vs_low, vs_total)
+        r_norm = _ratio(vs_norm, vs_total)
+        r_high = _ratio(vs_high, vs_total)
+
+        if r_high >= 0.4:
+            volume_stability = "unstable"
+        elif r_norm >= 0.4:
+            volume_stability = "moderate"
+        else:
+            # 대부분 LOW_VAR이거나 섞여 있지만 HIGH_VAR는 적을 때
+            volume_stability = "stable"
+
+        # -------------------------
+        # 2) volume_pattern
+        #     → mostly_weak / mostly_clear / mixed
+        # -------------------------
+        vp = mat[1]
+        vp_stable_clear  = vp[0]
+        vp_natural_soft  = vp[1]
+        vp_strong_fade   = vp[2]
+        vp_rising        = vp[3]
+        vp_mixed         = vp[4]
+
+        weak_count  = vp_strong_fade                # 힘 확 빠지는 종결
+        clear_count = vp_stable_clear + vp_natural_soft
+        # rising + mixed는 중립/혼합으로 두고 비율 계산에서 같이 포함
+        vp_total = weak_count + clear_count + vp_rising + vp_mixed
+
+        r_weak  = _ratio(weak_count, vp_total)
+        r_clear = _ratio(clear_count, vp_total)
+
+        if r_weak >= 0.5:
+            volume_pattern = "mostly_weak"
+        elif r_clear >= 0.5:
+            volume_pattern = "mostly_clear"
+        else:
+            volume_pattern = "mixed"
+
+        # -------------------------
+        # 3) pitch_stability → flat / balanced / very_dynamic
+        # -------------------------
+        ps = mat[2]
+        ps_total = sum(ps[:3])
+        ps_low, ps_norm, ps_high = ps[0], ps[1], ps[2]
+
+        r_p_low  = _ratio(ps_low, ps_total)
+        r_p_norm = _ratio(ps_norm, ps_total)
+        r_p_high = _ratio(ps_high, ps_total)
+
+        if r_p_high >= 0.4:
+            pitch_stability = "very_dynamic"
+        elif r_p_low >= 0.4:
+            pitch_stability = "flat"
+        else:
+            pitch_stability = "balanced"
+
+        # -------------------------
+        # 4) pitch_ending → mostly_falling / mostly_flat / many_rising / mixed
+        # -------------------------
+        pe = mat[3]
+        pe_qlike   = pe[0]  # QUESTION_LIKE → rising
+        pe_flat    = pe[1]  # FLAT_NEUTRAL
+        pe_nat     = pe[2]  # NATURAL_DECL
+        pe_strong  = pe[3]  # STRONG_DECL
+        pe_mixed   = pe[4]
+
+        rising_cnt  = pe_qlike
+        falling_cnt = pe_nat + pe_strong
+        flat_cnt    = pe_flat
+
+        pe_total = rising_cnt + falling_cnt + flat_cnt + pe_mixed
+
+        r_rising  = _ratio(rising_cnt, pe_total)
+        r_falling = _ratio(falling_cnt, pe_total)
+        r_flat    = _ratio(flat_cnt, pe_total)
+
+        if r_rising >= 0.5:
+            pitch_ending = "many_rising"
+        elif r_falling >= 0.5:
+            pitch_ending = "mostly_falling"
+        elif r_flat >= 0.5:
+            pitch_ending = "mostly_flat"
+        else:
+            pitch_ending = "mixed"
+
+        # -------------------------
+        # 5) rate_level → mostly_slow / mostly_normal / mostly_fast
+        # -------------------------
+        rl = mat[4]
+        slow, typical, fast = rl[0], rl[1], rl[2]
+        rl_total = slow + typical + fast
+
+        r_slow    = _ratio(slow, rl_total)
+        r_typical = _ratio(typical, rl_total)
+        r_fast    = _ratio(fast, rl_total)
+
+        if r_fast >= 0.5:
+            rate_level = "mostly_fast"
+        elif r_slow >= 0.5:
+            rate_level = "mostly_slow"
+        else:
+            # typical 비율이 가장 크거나,
+            # slow/fast가 섞여 있어도 보통은 "정상 범위"로 본다
+            rate_level = "mostly_normal"
+
+        paragraph_labelings.append({
+            "part": part,
+            "volume_stability": volume_stability,
+            "ending_pattern": volume_pattern,
+            "pitch_stability": pitch_stability,
+            "pitch_ending": pitch_ending,
+            "rate_level": rate_level
+        })
+    return paragraph_labelings
