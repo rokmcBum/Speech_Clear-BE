@@ -305,6 +305,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             progress_callback(current_progress)  
         analyzed.append(segment_info)
 
+    # 문단별 인덱스 맵 생성
     paragraph_index = make_part_index_map(final_segments)
 
     feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback(analyzed, paragraph_index)

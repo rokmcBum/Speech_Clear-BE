@@ -555,10 +555,7 @@ def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[D
             # 대부분 LOW_VAR이거나 섞여 있지만 HIGH_VAR는 적을 때
             volume_stability = "stable"
 
-        # -------------------------
-        # 2) volume_pattern
-        #     → mostly_weak / mostly_clear / mixed
-        # -------------------------
+        # 2) volume_pattern → mostly_weak / mostly_clear / mixed
         vp = mat[1]
         vp_stable_clear  = vp[0]
         vp_natural_soft  = vp[1]
@@ -581,9 +578,7 @@ def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[D
         else:
             volume_pattern = "mixed"
 
-        # -------------------------
         # 3) pitch_stability → flat / balanced / very_dynamic
-        # -------------------------
         ps = mat[2]
         ps_total = sum(ps[:3])
         ps_low, ps_norm, ps_high = ps[0], ps[1], ps[2]
@@ -599,9 +594,7 @@ def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[D
         else:
             pitch_stability = "balanced"
 
-        # -------------------------
         # 4) pitch_ending → mostly_falling / mostly_flat / many_rising / mixed
-        # -------------------------
         pe = mat[3]
         pe_qlike   = pe[0]  # QUESTION_LIKE → rising
         pe_flat    = pe[1]  # FLAT_NEUTRAL
@@ -628,9 +621,7 @@ def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[D
         else:
             pitch_ending = "mixed"
 
-        # -------------------------
         # 5) rate_level → mostly_slow / mostly_normal / mostly_fast
-        # -------------------------
         rl = mat[4]
         slow, typical, fast = rl[0], rl[1], rl[2]
         rl_total = slow + typical + fast

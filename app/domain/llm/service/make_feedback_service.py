@@ -35,6 +35,7 @@ LABEL_SPACES = {
     "rate_level": ["SLOW", "TYPICAL", "FAST", "UNKNOWN"],  # 4개
 }
 
+# 피드백 label 매트릭스 업데이트 함수
 def update_matrix(matrix, feature_name, label_value):
     idx = LABEL_SPACES[feature_name].index(label_value)
     feature_order = list(LABEL_SPACES.keys())  # 순서 고정
@@ -161,17 +162,7 @@ def make_feedback(segments:list, paragraph_index:dict):
             # 매트릭스 초기화
             matrix_5x5 = np.zeros((5, 5), dtype=int)
 
-
-        analyzed_metrics = {
-            "volume_stability": analyzed["volume_stability"]["label"],
-            "volume_pattern": analyzed["volume_pattern"]["label"],
-            "pitch_stability": analyzed["pitch_stability"]["label"],
-            "pitch_ending": analyzed["pitch_ending"]["label"],
-            "rate_level": analyzed["rate_level"]["label"]
-        }  ## 디버깅용
-
         sentence_feedback.append({
-            "analyzed_metrics": analyzed_metrics, ## 디버깅용
             "id": index,
             "start_time": seg["start"],
             "end_time": seg["end"],
@@ -189,7 +180,5 @@ def make_feedback(segments:list, paragraph_index:dict):
             "part": para["part"],
             "feedback": feedback
         })
-
-
 
     return sentence_feedback, paragraph_feedback
