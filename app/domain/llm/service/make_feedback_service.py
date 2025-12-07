@@ -147,8 +147,7 @@ def make_feedback(segments:list, paragraph_index:dict):
         # print(analyzed)
         # LLM 피드백 생성
         if need_feedback:
-            # feedback = get_sentence_feedback_from_LLM(analyzed)
-            feedback = None
+            feedback = get_sentence_feedback_from_LLM(analyzed)
         else:
             feedback = None
 

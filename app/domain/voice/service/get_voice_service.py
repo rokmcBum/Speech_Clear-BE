@@ -4,7 +4,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
 
-from app.domain.voice.model.voice import Voice, VoiceSegment
+from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import download_file
 import tempfile
@@ -25,6 +25,16 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         .order_by(VoiceSegment.order_no.asc())
         .all()
     )
+    
+    # 문단별 피드백 조회
+    paragraph_feedbacks = (
+        db.query(VoiceParagraphFeedback)
+        .filter(VoiceParagraphFeedback.voice_id == voice_id)
+        .all()
+    )
+    
+    # part별 피드백 매핑
+    paragraph_feedback_map = {pf.part: pf.feedback for pf in paragraph_feedbacks}
     
     # category_name 설정
     if voice.category_id is None:
@@ -101,6 +111,7 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         if current_part is not None and current_part != part:
             scripts.append({
                 "part": current_part,
+                "paragraph_feedback": paragraph_feedback_map.get(current_part, ""),
                 "segments": current_segments
             })
             current_segments = []
@@ -112,6 +123,7 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
     if current_part is not None and current_segments:
         scripts.append({
             "part": current_part,
+            "paragraph_feedback": paragraph_feedback_map.get(current_part, ""),
             "segments": current_segments
         })
     

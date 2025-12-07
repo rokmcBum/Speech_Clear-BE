@@ -14,7 +14,7 @@ from app.domain.llm.service import make_feedback_service
 from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
-from app.domain.voice.model.voice import Voice, VoiceSegment
+from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
 from app.domain.voice.utils.draw_dB_image import draw
 from app.domain.voice.utils.map_sections_to_segments import (
     split_llm_sections_into_sentences_with_clova_timestamps,
@@ -310,8 +310,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
 
     feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback(analyzed, paragraph_index)
 
-    # 피드백을 segment_index로 매핑
-    feedback_map = {fb["segment_index"]: fb["feedback"] for fb in feedbacks_list}
+    # 피드백을 segment_index로 매핑 (id는 0부터 시작)
+    feedback_map = {fb["id"]: fb["feedback"] for fb in feedbacks_list}
         # 진행률 업데이트 (50% ~ 90% 사이)
     # Voice 생성 및 저장
     voice = Voice(
@@ -325,6 +325,17 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     )
     db.add(voice)
     db.flush()
+    
+    # 문단별 피드백 저장
+    for para_fb in paragraph_feedback:
+        paragraph_feedback_obj = VoiceParagraphFeedback(
+            voice_id=voice.id,
+            part=para_fb["part"],
+            feedback=para_fb["feedback"]
+        )
+        db.add(paragraph_feedback_obj)
+    
+    db.flush()  # paragraph_feedback도 flush하여 voice.id 사용 가능하도록
     
     # 세그먼트 저장 (object storage + DB)
     audio = AudioSegment.from_file(tmp_path)
@@ -351,10 +362,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         object_name = f"voices/{voice.id}/segments/seg_{order_no}"
         seg_url = upload_file(tmp_file.name, object_name)
         
-        # 피드백 가져오기 (segment_index는 0부터 시작, order_no는 1부터 시작)
-        segment_index = order_no - 1
-        feedback_text = feedback_map.get(segment_index, "")
-        
+        feedback_text = feedback_map.get(order_no, "")        print("order_no")
+
         # DB에 저장 (analyzed_seg의 정보 사용)
         energy = analyzed_seg.get("energy", {})
         pitch = analyzed_seg.get("pitch", {})
