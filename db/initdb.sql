@@ -60,6 +60,14 @@ CREATE TABLE IF NOT EXISTS voice_segment_versions (
     CONSTRAINT uq_segment_version UNIQUE (segment_id, version_no)
     );
 
+CREATE TABLE IF NOT EXISTS voice_paragraph_feedbacks (
+    id SERIAL PRIMARY KEY,
+    voice_id INT NOT NULL REFERENCES voices(id) ON DELETE CASCADE,
+    part VARCHAR(50) NOT NULL,
+    feedback TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_category_user_id ON categories(user_id);
 CREATE INDEX IF NOT EXISTS idx_voice_user_id ON voices(user_id);
 CREATE INDEX IF NOT EXISTS idx_voice_category_id ON voices(category_id);
@@ -67,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_prev_id ON voices(previous_voice_id);
 CREATE INDEX IF NOT EXISTS idx_voice_segments_voice_id ON voice_segments(voice_id);
 CREATE INDEX IF NOT EXISTS idx_voice_segments_order_no ON voice_segments(order_no);
 CREATE INDEX IF NOT EXISTS idx_vsv_segment_id ON voice_segment_versions(segment_id);
+CREATE INDEX IF NOT EXISTS idx_vpf_voice_id ON voice_paragraph_feedbacks(voice_id);
 
 -- 테스트 데이터 삽입
 -- Users 

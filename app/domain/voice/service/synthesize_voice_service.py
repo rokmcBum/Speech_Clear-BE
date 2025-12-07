@@ -81,7 +81,8 @@ def synthesize_voice(voice_id: int, db: Session, user: User):
         duration_sec = len(combined) / 1000.0
         synthesized_voice = Voice(
             user_id=user.id,
-            category_id=original_voice.category_id,  
+            category_id=original_voice.category_id,
+            name=original_voice.name,  # 원본 voice의 name 사용
             filename=out_tmp.name,
             content_type="audio/mp4",
             original_url=final_url,
