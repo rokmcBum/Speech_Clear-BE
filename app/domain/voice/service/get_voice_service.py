@@ -92,6 +92,10 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         
         part = seg.part if seg.part else "기타"
         
+        # db, pitch 변환
+        real_db = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
+        real_hz = 55.0 * (2 ** (seg.hz / 12.0))
+
         segment_data = {
             "segment_id": seg.id,
             "text": seg.text,
@@ -101,8 +105,8 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
             "feedback": seg.feedback if seg.feedback else "",
             "dB_list": dB_list,
             "metrics": {
-                "dB": seg.db if seg.db else 0.0,
-                "pitch_mean_hz": seg.pitch_mean_hz if seg.pitch_mean_hz else 0.0,
+                "dB": real_db if real_db else 0.0,
+                "pitch_mean_hz": real_hz if real_hz else 0.0,
                 "rate_wpm": seg.rate_wpm if seg.rate_wpm else 0.0,
             }
         }
