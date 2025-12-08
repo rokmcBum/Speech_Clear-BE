@@ -1,7 +1,7 @@
 # app/utils/audio_analyzer.py
-import whisper
 import librosa
 import numpy as np
+import whisper
 
 
 def transcribe_audio(audio_path: str, model_name="turbo", language="ko"):
@@ -150,7 +150,7 @@ def analyze_segments(audio_path: str, model_name="turbo", language="ko"):
 
         if len(y_seg) > 0:
             rms = librosa.feature.rms(y=y_seg)
-            db = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
+            db = float(np.mean(librosa.amplitude_to_db(rms, ref=1.0)))
             metrics["dB"] = round(db, 2)
 
             f0, _, _ = librosa.pyin(

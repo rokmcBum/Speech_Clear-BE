@@ -14,7 +14,7 @@ from app.domain.llm.service import make_feedback_service
 from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
-from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
+from app.domain.voice.model.voice import Voice, VoiceParagraphFeedback, VoiceSegment
 from app.domain.voice.utils.draw_dB_image import draw
 from app.domain.voice.utils.map_sections_to_segments import (
     split_llm_sections_into_sentences_with_clova_timestamps,
@@ -25,7 +25,7 @@ from app.utils.analyzer_function import (
     compute_final_boundary_features_for_segment,
     compute_pitch_cv_segment,
     get_voiced_mask_from_words,
-    make_part_index_map
+    make_part_index_map,
 )
 from app.utils.audio_analyzer import (
     analyze_segment_audio,
@@ -164,7 +164,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     f0, _, _ = librosa.pyin(
         y,
         fmin=80,
-        fmax=300,
+        fmax=800,
         frame_length=frame_length,
         hop_length=hop_length,
         sr=sr
@@ -191,6 +191,9 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         # 이 문장에 속하는 프레임 인덱스
         y_seg = (frame_times >= seg_start) & (frame_times <= seg_end)
 
+        mean_db = 0.0
+        mean_hz = 0.0
+
         if len(y_seg) > 0:
 
             # 이 문장 구간 + 유성 마스크 둘 다 만족하는 프레임
@@ -204,12 +207,27 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 rms=rms_seg,
                 silence_thresh=1e-6
             )
+            
+            # [FIX] dB calculation: RMS -> dB
+            if len(rms_seg) > 0:
+                # ref를 np.max(rms)로 하면 전체 대비 상대 크기
+                # 여기서는 rms_seg(해당 세그먼트) 자체의 max를 쓸지, 전체 max를 쓸지 결정 필요
+                # 재녹음 로직(analyze_segments)과의 정합성을 위해 세그먼트 기준 계산 시도
+                # 하지만, 구간별 비교를 위해 global max가 나을 수 있음
+                # 여기서는 오디오 분석 유틸과 가장 유사하게 맞춤
+                # analyze_segments에서는 "amplitude_to_db(rms, ref=np.max)"를 씀 (local max)
+                mean_db = float(np.mean(librosa.amplitude_to_db(rms_seg, ref=1.0)))
 
             # pitch 계산
             mean_st, std_st, cv_pitch = compute_pitch_cv_segment(
                 f0_hz=f0_seg,
                 f0_min=1e-3
             )
+            
+            # [FIX] Hz calculation
+            valid_f0 = f0_seg[f0_seg > 1e-3]
+            if len(valid_f0) > 0:
+                mean_hz = float(np.mean(valid_f0))
             
             # segment 프레임 시간 (초)
             seg_frame_idx = np.arange(rms[y_seg].shape[0])
@@ -229,6 +247,14 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             duration_min = (seg_end - seg_start) / 60
             rate_wpm = words_count / duration_min if duration_min > 0 else 0
 
+        else:
+            # y_seg가 없을 경우 기본값
+            mean_r, std_r, cv_energy = 0, 0, 0
+            mean_st, std_st, cv_pitch = 0, 0, 0
+            final_rms_ratio, final_rms_slope = 0, 0
+            final_pitch_semitone_drop, final_pitch_semitone_slope = 0, 0
+            rate_wpm, words_count = 0, 0
+
         # 문장 단위 정보 구성
         segment_info ={
             "id": id,
@@ -239,12 +265,14 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             "energy": {
                 "mean_rms": round(mean_r, 2),
                 "std_rms": round(std_r, 2),
-                "cv": round(cv_energy, 4)
+                "cv": round(cv_energy, 4),
+                "mean_db": round(mean_db, 2)  # [FIX] Added mean_db
             },
             "pitch": {
                 "mean_st": round(mean_st, 2),
                 "std_st": round(std_st, 2),
-                "cv": round(cv_pitch, 4)
+                "cv": round(cv_pitch, 4),
+                "mean_hz": round(mean_hz, 2)  # [FIX] Added mean_hz
             },
             "wpm":{
                 "word_count": words_count,
@@ -362,7 +390,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         object_name = f"voices/{voice.id}/segments/seg_{order_no}"
         seg_url = upload_file(tmp_file.name, object_name)
         
-        feedback_text = feedback_map.get(order_no, "")        print("order_no")
+        feedback_text = feedback_map.get(order_no - 1, "")
+
 
         # DB에 저장 (analyzed_seg의 정보 사용)
         energy = analyzed_seg.get("energy", {})
@@ -378,8 +407,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             start_time=float(analyzed_seg["start"]),  # 초 단위
             end_time=float(analyzed_seg["end"]),      # 초 단위
             segment_url=seg_url,
-            db=float(energy.get("mean_rms", 0.0)),  # mean_rms를 dB로 사용
-            pitch_mean_hz=float(pitch.get("mean_hz", 0.0)),
+            db=float(energy.get("mean_db", 0.0)),    # [FIX] Use mean_db
+            pitch_mean_hz=float(pitch.get("mean_hz", 0.0)), # [FIX] Use mean_hz (now calculated)
             rate_wpm=float(wpm.get("rate_wpm", 0.0)),
             pause_ratio=0.0,  # 새로운 구조에는 없음
             prosody_score=0.0,  # 새로운 구조에는 없음
