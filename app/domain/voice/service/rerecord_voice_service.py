@@ -31,6 +31,19 @@ def _to_float(v):
         return None
 
 
+def safe_float(value):
+    """NaN/inf를 안전하게 처리하는 float 변환 함수"""
+    if value is None:
+        return 0.0
+    try:
+        val = float(value)
+        if np.isnan(val) or np.isinf(val):
+            return 0.0
+        return val
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _next_version_no(db: Session, segment_id: int) -> int:
     last = (
         db.query(VoiceSegmentVersion)
@@ -182,30 +195,30 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
         "id": 0,
         "part": seg.part,  # 기존 segment의 part 사용
         "text": seg_text,
-        "start": seg_start,
-        "end": seg_end,
+        "start": safe_float(seg_start),
+        "end": safe_float(seg_end),
         "energy": {
-            "mean_rms": round(mean_r, 2) if not np.isnan(mean_r) else 0.0,
-            "std_rms": round(std_r, 2) if not np.isnan(std_r) else 0.0,
-            "cv": round(cv_energy, 4) if not np.isnan(cv_energy) else 0.0,
-            "mean_db": round(mean_db, 2)  # [FIX] Added mean_db
+            "mean_rms": safe_float(mean_r),
+            "std_rms": safe_float(std_r),
+            "cv": safe_float(cv_energy),
+            "mean_db": safe_float(mean_db)  # [FIX] Added mean_db
         },
         "pitch": {
-            "mean_st": round(mean_st, 2) if not np.isnan(mean_st) else 0.0,
-            "std_st": round(std_st, 2) if not np.isnan(std_st) else 0.0,
-            "cv": round(cv_pitch, 4) if not np.isnan(cv_pitch) else 0.0,
-            "mean_hz": round(float(np.mean(f0_seg)), 2) if len(f0_seg) > 0 else 0.0  # [FIX] Added mean_hz
+            "mean_st": safe_float(mean_st),
+            "std_st": safe_float(std_st),
+            "cv": safe_float(cv_pitch),
+            "mean_hz": safe_float(np.mean(f0_seg)) if len(f0_seg) > 0 else 0.0  # [FIX] Added mean_hz
         },
         "wpm": {
             "word_count": words_count,
-            "rate_wpm": round(rate_wpm, 1),
-            "duration_sec": round(seg_end - seg_start, 3)
+            "rate_wpm": safe_float(rate_wpm),
+            "duration_sec": safe_float(seg_end - seg_start)
         },
         "final_boundary": {
-            "final_rms_ratio": round(final_rms_ratio, 2) if not np.isnan(final_rms_ratio) else 0.0,
-            "final_rms_slope": round(final_rms_slope, 4) if not np.isnan(final_rms_slope) else 0.0,
-            "final_pitch_semitone_drop": round(final_pitch_semitone_drop, 2) if not np.isnan(final_pitch_semitone_drop) else 0.0,
-            "final_pitch_semitone_slope": round(final_pitch_semitone_slope, 4) if not np.isnan(final_pitch_semitone_slope) else 0.0
+            "final_rms_ratio": safe_float(final_rms_ratio),
+            "final_rms_slope": safe_float(final_rms_slope),
+            "final_pitch_semitone_drop": safe_float(final_pitch_semitone_drop),
+            "final_pitch_semitone_slope": safe_float(final_pitch_semitone_slope)
         },
         "words": []
     }
@@ -239,13 +252,13 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
 
         segment_info["words"].append({
             "text": w_text,
-            "start": w_start,
-            "end": w_end,
+            "start": safe_float(w_start),
+            "end": safe_float(w_end),
             "metrics": {
-                "dB": round(db_value, 2),
-                "pitch_mean_hz": round(pitch_mean, 2),
-                "pitch_std_hz": round(pitch_std, 2),
-                "duration_sec": round(duration_word, 3)
+                "dB": safe_float(db_value),
+                "pitch_mean_hz": safe_float(pitch_mean),
+                "pitch_std_hz": safe_float(pitch_std),
+                "duration_sec": safe_float(duration_word)
             }
         })
 
@@ -271,8 +284,8 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
     if db_list_str:
         try:
             dB_list = json.loads(db_list_str)
-            # float 리스트로 변환
-            dB_list = [float(x) for x in dB_list] if isinstance(dB_list, list) else []
+            # float 리스트로 변환 (NaN/inf 체크 포함)
+            dB_list = [safe_float(x) for x in dB_list] if isinstance(dB_list, list) else []
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"⚠️ dB_list 파싱 실패: {e}, 빈 리스트로 저장")
             dB_list = []
@@ -281,15 +294,42 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
     energy = segment_info.get("energy", {})
     pitch = segment_info.get("pitch", {})
     wpm = segment_info.get("wpm", {})
+    
+    # real_db 계산: 세그먼트 오디오를 다시 로드하여 RMS를 dB로 변환 (upload_voice_service.py와 동일)
+    real_db = 0.0
+    real_hz = 0.0
+    
+    try:
+        y_seg_audio, sr_seg = librosa.load(tmp_path, sr=16000)
+        if len(y_seg_audio) > 0:
+            # real_db 계산: 전체 세그먼트의 RMS를 dB로 변환 (upload_voice_service.py와 동일)
+            rms_full = librosa.feature.rms(y=y_seg_audio)
+            real_db = float(np.mean(librosa.amplitude_to_db(rms_full, ref=np.max)))
+    except Exception as e:
+        print(f"⚠️ 세그먼트 오디오 재로드 실패: {e}")
+        # fallback: mean_db 사용
+        real_db = safe_float(energy.get("mean_db", 0.0))
+    
+    # real_hz 계산: mean_st(semitone)을 Hz로 변환 (upload_voice_service.py와 동일)
+    mean_st = pitch.get("mean_st", 0.0)
+    if mean_st and not np.isnan(mean_st) and mean_st != 0.0:
+        real_hz = 55.0 * (2 ** (mean_st / 12.0))
+    else:
+        # fallback: mean_hz가 이미 Hz 값이므로 그대로 사용
+        real_hz = safe_float(pitch.get("mean_hz", 0.0))
+    
+    # NaN/inf 체크 및 float 변환 (JSON 직렬화를 위해)
+    real_db = safe_float(real_db)
+    real_hz = safe_float(real_hz)
 
     version = VoiceSegmentVersion(
         segment_id=seg.id,
         version_no=ver_no,
         text=seg_text,
         segment_url=seg_url,
-        db=float(energy.get("mean_db", 0.0)),    # [FIX] Use mean_db
-        pitch_mean_hz=float(pitch.get("mean_hz", 0.0)), # [FIX] Use mean_hz (now calculated)
-        rate_wpm=float(wpm.get("rate_wpm", 0.0)),
+        db=real_db,
+        pitch_mean_hz=real_hz,
+        rate_wpm=safe_float(wpm.get("rate_wpm", 0.0)),
         pause_ratio=0.0,  # 새로운 구조에는 없음
         prosody_score=0.0,  # 새로운 구조에는 없음
         feedback=feedback_text,
@@ -310,15 +350,15 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
         "id": version.id,
         "segment_id": version.segment_id,
         "version_no": version.version_no,
-        "text": version.text,
-        "segment_url": version.segment_url,
-        "feedback": version.feedback,
+        "text": version.text if version.text else "",
+        "segment_url": version.segment_url if version.segment_url else "",
+        "feedback": version.feedback if version.feedback else "",
         "dB_list": dB_list,  # 0.1초 간격으로 측정된 dB 값 리스트
         "metrics": {
-            "dB": version.db,
-            "pitch_mean_hz": version.pitch_mean_hz,
-            "rate_wpm": version.rate_wpm,
-            "pause_ratio": version.pause_ratio,
-            "prosody_score": version.prosody_score,
+            "dB": safe_float(version.db),
+            "pitch_mean_hz": safe_float(version.pitch_mean_hz),
+            "rate_wpm": safe_float(version.rate_wpm),
+            "pause_ratio": safe_float(version.pause_ratio),
+            "prosody_score": safe_float(version.prosody_score),
         }
     }

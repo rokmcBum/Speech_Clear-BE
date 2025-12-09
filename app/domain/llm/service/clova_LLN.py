@@ -21,36 +21,48 @@ class CompletionExecutor:
             'Accept': 'text/event-stream'
         }
 
-        result_content = None  # 초기화
+        collected_content = ""  # 스트리밍 데이터 누적
 
-        with requests.post(self._host + '/v1/chat-completions/HCX-003',
-                           headers=headers, json=completion_request, stream=True) as r:
-            for line in r.iter_lines():
-                if not line:
-                    continue
+        try:
+            with requests.post(self._host + '/v1/chat-completions/HCX-003',
+                               headers=headers, json=completion_request, stream=True, timeout=60) as r:
+                r.raise_for_status()  # HTTP 에러 체크
+                
+                for line in r.iter_lines():
+                    if not line:
+                        continue
 
-                decoded = line.decode("utf-8").strip()
+                    decoded = line.decode("utf-8").strip()
 
-                # ✅ 스트리밍 종료
-                if decoded in ["data:[DONE]", "data: [DONE]"]:
-                    break
+                    # ✅ 스트리밍 종료
+                    if decoded in ["data:[DONE]", "data: [DONE]"]:
+                        break
 
-                # ✅ event:result인 경우에만 처리
-                if decoded.startswith("event:result"):
-                    continue  # event 이름은 건너뜀
+                    # ✅ event:result인 경우에만 처리
+                    if decoded.startswith("event:result"):
+                        continue  # event 이름은 건너뜀
 
-                if decoded.startswith("data:"):
-                    try:
-                        data_json = json.loads(decoded.replace("data:", "").strip())
+                    if decoded.startswith("data:"):
+                        try:
+                            data_json = json.loads(decoded.replace("data:", "").strip())
 
-                        # ✅ event:result 데이터만 잡기
-                        if data_json.get("message") and data_json["message"]["role"] == "assistant":
-                            # 최종 결과 저장
-                            result_content = data_json["message"].get("content", None)
-                    except json.JSONDecodeError:
-                        pass
+                            # ✅ event:result 데이터만 잡기
+                            if data_json.get("message") and data_json["message"]["role"] == "assistant":
+                                # 스트리밍 데이터 누적
+                                content = data_json["message"].get("content", "")
+                                if content:
+                                    collected_content += content
+                        except json.JSONDecodeError:
+                            pass
+                        except Exception as e:
+                            print(f"⚠️ 데이터 파싱 에러: {e}")
+                            pass
 
-        return result_content if result_content is not None else ""
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ LLM API 요청 에러: {e}")
+            return ""
+
+        return collected_content if collected_content else ""
 
 def get_sentence_feedback_from_LLM(sentence_info: dict):
     completion_executor = CompletionExecutor(

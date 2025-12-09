@@ -26,13 +26,6 @@ from app.utils.analyzer_function import (
     get_voiced_mask_from_words,
     make_part_index_map
 )
-from app.utils.audio_analyzer import (
-    analyze_segment_audio,
-    analyze_segments,
-    transcribe_audio,
-)
-from app.utils.feedback_rules import make_feedback
-
 
 def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     audio = AudioSegment.from_file(local_path)
@@ -324,7 +317,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     )
     db.add(voice)
     db.flush()
-    
+
     # 문단별 피드백 저장
     for para_fb in paragraph_feedback:
         paragraph_feedback_obj = VoiceParagraphFeedback(
@@ -363,19 +356,23 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         
         feedback_text = feedback_map.get(order_no - 1, "")  # id는 0부터 시작하므로 order_no - 1
 
-        # 0.1초 간격으로 dB_list 계산
+        # 0.1초 간격으로 dB_list 계산 및 db, pitch 변환
         dB_list = []
+        real_db = 0.0
+        real_hz = 0.0
+        
         if len(seg_audio) > 0:
             # librosa로 세그먼트 오디오 로드
             seg_audio_path = tmp_file.name
             y_seg_audio, sr_seg = librosa.load(seg_audio_path, sr=16000)
             if len(y_seg_audio) > 0:
+                # dB_list 계산
                 interval_samples = int(0.1 * sr_seg)  # 0.1초에 해당하는 샘플 수
                 for i in range(0, len(y_seg_audio), interval_samples):
                     chunk = y_seg_audio[i:i + interval_samples]
                     if len(chunk) > 0:
                         rms = librosa.feature.rms(y=chunk)
-                        db_value = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
+                        db_value = float(np.mean(librosa.amplitude_to_db(rms, ref=1.0)))
                         dB_list.append(round(db_value, 2))
 
         # DB에 저장 (analyzed_seg의 정보 사용)
@@ -383,7 +380,17 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         pitch = analyzed_seg.get("pitch", {})
         wpm = analyzed_seg.get("wpm", {})
         
-        # 기존 DB 구조에 맞게 변환
+        
+        real_db = float(np.mean(librosa.amplitude_to_db(energy.get("mean_rms", 0.0), ref=1.0)))
+        mean_st = pitch.get("mean_st", 0.0)
+        if mean_st and not np.isnan(mean_st) and mean_st != 0.0:
+            real_hz = 55.0 * (2 ** (mean_st / 12.0))
+        else:
+            real_hz = 0.0
+        
+        # NaN/inf 체크 및 float 변환 (JSON 직렬화를 위해)
+        real_db = float(real_db) if not (np.isnan(real_db) or np.isinf(real_db)) else 0.0
+        real_hz = float(real_hz) if not (np.isnan(real_hz) or np.isinf(real_hz)) else 0.0
         segment = VoiceSegment(
             voice_id=voice.id,
             order_no=order_no,
@@ -392,8 +399,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             start_time=float(analyzed_seg["start"]),  # 초 단위
             end_time=float(analyzed_seg["end"]),      # 초 단위
             segment_url=seg_url,
-            db=float(energy.get("mean_rms", 0.0)),  # mean_rms를 dB로 사용
-            pitch_mean_hz=float(pitch.get("mean_st", 0.0)),
+            db=real_db,
+            pitch_mean_hz=real_hz,
             rate_wpm=float(wpm.get("rate_wpm", 0.0)),
             pause_ratio=0.0,  # 새로운 구조에는 없음
             prosody_score=0.0,  # 새로운 구조에는 없음
@@ -408,6 +415,19 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     if progress_callback:
         progress_callback(100) # 완료: 100%
 
+    # JSON 직렬화를 위해 NaN/inf 체크 및 변환
+    def safe_float(value):
+        """NaN, inf, None을 안전한 float로 변환"""
+        if value is None:
+            return 0.0
+        try:
+            val = float(value)
+            if np.isnan(val) or np.isinf(val):
+                return 0.0
+            return val
+        except (TypeError, ValueError):
+            return 0.0
+    
     return {
         "voice_id": voice.id,
         "original_url": voice.original_url,
@@ -415,18 +435,18 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             {
                 "id": seg.id,
                 "order_no": seg.order_no,
-                "text": seg.text,
-                "part": seg.part,
-                "start": seg.start_time,
-                "end": seg.end_time,
-                "segment_url": seg.segment_url,
-                "feedback": seg.feedback,
+                "text": seg.text if seg.text else "",
+                "part": seg.part if seg.part else "",
+                "start": safe_float(seg.start_time),
+                "end": safe_float(seg.end_time),
+                "segment_url": seg.segment_url if seg.segment_url else "",
+                "feedback": seg.feedback if seg.feedback else "",
                 "metrics": {
-                    "dB": seg.db,
-                    "pitch_mean_hz": seg.pitch_mean_hz,
-                    "rate_wpm": seg.rate_wpm,
-                    "pause_ratio": seg.pause_ratio,
-                    "prosody_score": seg.prosody_score,
+                    "dB": safe_float(seg.db),
+                    "pitch_mean_hz": safe_float(seg.pitch_mean_hz),
+                    "rate_wpm": safe_float(seg.rate_wpm),
+                    "pause_ratio": safe_float(seg.pause_ratio),
+                    "prosody_score": safe_float(seg.prosody_score),
                 }
             } for seg in saved_segments
         ]
