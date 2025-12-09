@@ -15,7 +15,6 @@ from app.domain.llm.service.classify_text_service import classify_text_into_sect
 from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
-from app.domain.voice.utils.draw_dB_image import draw
 from app.domain.voice.utils.map_sections_to_segments import (
     split_llm_sections_into_sentences_with_clova_timestamps,
 )
@@ -362,7 +361,22 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         object_name = f"voices/{voice.id}/segments/seg_{order_no}"
         seg_url = upload_file(tmp_file.name, object_name)
         
-        feedback_text = feedback_map.get(order_no, "")        print("order_no")
+        feedback_text = feedback_map.get(order_no - 1, "")  # id는 0부터 시작하므로 order_no - 1
+
+        # 0.1초 간격으로 dB_list 계산
+        dB_list = []
+        if len(seg_audio) > 0:
+            # librosa로 세그먼트 오디오 로드
+            seg_audio_path = tmp_file.name
+            y_seg_audio, sr_seg = librosa.load(seg_audio_path, sr=16000)
+            if len(y_seg_audio) > 0:
+                interval_samples = int(0.1 * sr_seg)  # 0.1초에 해당하는 샘플 수
+                for i in range(0, len(y_seg_audio), interval_samples):
+                    chunk = y_seg_audio[i:i + interval_samples]
+                    if len(chunk) > 0:
+                        rms = librosa.feature.rms(y=chunk)
+                        db_value = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
+                        dB_list.append(round(db_value, 2))
 
         # DB에 저장 (analyzed_seg의 정보 사용)
         energy = analyzed_seg.get("energy", {})
@@ -384,6 +398,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             pause_ratio=0.0,  # 새로운 구조에는 없음
             prosody_score=0.0,  # 새로운 구조에는 없음
             feedback=feedback_text,
+            db_list=dB_list,  # 0.1초 간격으로 측정된 dB 값 리스트
         )
         db.add(segment)
         saved_segments.append(segment)

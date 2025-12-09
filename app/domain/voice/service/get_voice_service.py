@@ -1,10 +1,10 @@
 # app/domain/voice/service/get_voice_service.py
 import librosa
 import numpy as np
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Dict, Any, List
 
-from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
+from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceSegmentVersion, VoiceParagraphFeedback
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import download_file
 import tempfile
@@ -18,9 +18,10 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
     # voice 소유권 검증
     voice = verify_voice_ownership(voice_id, user, db)
     
-    # segments 조회 (order_no 순서대로)
+    # segments 조회 (order_no 순서대로, versions도 함께 로드)
     segments = (
         db.query(VoiceSegment)
+        .options(joinedload(VoiceSegment.versions))
         .filter(VoiceSegment.voice_id == voice_id)
         .order_by(VoiceSegment.order_no.asc())
         .all()
@@ -73,9 +74,11 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
     current_segments = []
     
     for seg in segments:
-        # dB_list 계산 (0.1초마다)
-        dB_list = []
-        if y_audio is not None and sr_audio is not None:
+        # dB_list는 DB에 저장된 값 사용 (없으면 계산)
+        dB_list = seg.db_list if seg.db_list else []
+        
+        # DB에 저장된 값이 없으면 계산 (하위 호환성)
+        if not dB_list and y_audio is not None and sr_audio is not None:
             seg_start = int(seg.start_time * sr_audio)
             seg_end = int(seg.end_time * sr_audio)
             seg_audio = y_audio[seg_start:seg_end]
@@ -92,9 +95,34 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         
         part = seg.part if seg.part else "기타"
         
-        # db, pitch 변환
-        real_db = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
-        real_hz = 55.0 * (2 ** (seg.hz / 12.0))
+        # db, pitch 변환 (기존 로직 유지)
+        # 참고: seg.db는 이미 저장된 값이므로 그대로 사용
+        real_db = seg.db if seg.db else 0.0
+        # pitch_mean_hz는 semitone이 아닌 Hz로 저장되어 있으므로 그대로 사용
+        real_hz = seg.pitch_mean_hz if seg.pitch_mean_hz else 0.0
+
+        # versions 정보 구성 (version_no 순서대로 정렬)
+        versions_data = []
+        if seg.versions:
+            sorted_versions = sorted(seg.versions, key=lambda v: v.version_no)
+            for version in sorted_versions:
+                version_dB_list = version.db_list if version.db_list else []
+                versions_data.append({
+                    "id": version.id,
+                    "version_no": version.version_no,
+                    "text": version.text,
+                    "segment_url": version.segment_url,
+                    "feedback": version.feedback if version.feedback else "",
+                    "dB_list": version_dB_list,
+                    "created_at": version.created_at.isoformat() if version.created_at else None,
+                    "metrics": {
+                        "dB": version.db if version.db else 0.0,
+                        "pitch_mean_hz": version.pitch_mean_hz if version.pitch_mean_hz else 0.0,
+                        "rate_wpm": version.rate_wpm if version.rate_wpm else 0.0,
+                        "pause_ratio": version.pause_ratio if version.pause_ratio else 0.0,
+                        "prosody_score": version.prosody_score if version.prosody_score else 0.0,
+                    }
+                })
 
         segment_data = {
             "segment_id": seg.id,
@@ -104,6 +132,7 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
             "segment_url": seg.segment_url,
             "feedback": seg.feedback if seg.feedback else "",
             "dB_list": dB_list,
+            "versions": versions_data,  # versions 추가
             "metrics": {
                 "dB": real_db if real_db else 0.0,
                 "pitch_mean_hz": real_hz if real_hz else 0.0,

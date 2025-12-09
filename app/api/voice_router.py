@@ -97,9 +97,10 @@ async def analyze_voice(
 @router.post("/segment/{segment_id}/re_record")
 def re_record(segment_id: int,
               file: UploadFile = File(...),
+              db_list: Optional[str] = Form(None, description="0.1초 간격으로 측정된 dB 값 리스트 (JSON 문자열)"),
               db: Session = Depends(get_session),
               user: User = Depends(get_current_user)):
-    result = re_record_segment(db, segment_id, file, user)
+    result = re_record_segment(db, segment_id, file, user, db_list)
     return result
 
 @router.post("/synthesize/{voice_id}/")
