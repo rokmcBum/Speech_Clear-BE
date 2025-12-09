@@ -1,11 +1,11 @@
+import json
 import os
 import tempfile
-import json
-from typing import Optional, List, Callable
+from typing import Callable, List, Optional
 
 import librosa
 import numpy as np
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from starlette import status
 
@@ -20,7 +20,7 @@ from app.utils.analyzer_function import (
     compute_final_boundary_features_for_segment,
     compute_pitch_cv_segment,
     get_voiced_mask_from_words,
-    make_part_index_map
+    make_part_index_map,
 )
 
 
@@ -147,6 +147,11 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
         rms=rms_seg,
         silence_thresh=1e-6
     )
+    
+    # [FIX] dB calculation: RMS -> dB (ref=1.0)
+    mean_db = 0.0
+    if len(rms_seg) > 0:
+        mean_db = float(np.mean(librosa.amplitude_to_db(rms_seg, ref=1.0)))
 
     # pitch 계산
     mean_st, std_st, cv_pitch = compute_pitch_cv_segment(
@@ -182,12 +187,14 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
         "energy": {
             "mean_rms": round(mean_r, 2) if not np.isnan(mean_r) else 0.0,
             "std_rms": round(std_r, 2) if not np.isnan(std_r) else 0.0,
-            "cv": round(cv_energy, 4) if not np.isnan(cv_energy) else 0.0
+            "cv": round(cv_energy, 4) if not np.isnan(cv_energy) else 0.0,
+            "mean_db": round(mean_db, 2)  # [FIX] Added mean_db
         },
         "pitch": {
             "mean_st": round(mean_st, 2) if not np.isnan(mean_st) else 0.0,
             "std_st": round(std_st, 2) if not np.isnan(std_st) else 0.0,
-            "cv": round(cv_pitch, 4) if not np.isnan(cv_pitch) else 0.0
+            "cv": round(cv_pitch, 4) if not np.isnan(cv_pitch) else 0.0,
+            "mean_hz": round(float(np.mean(f0_seg)), 2) if len(f0_seg) > 0 else 0.0  # [FIX] Added mean_hz
         },
         "wpm": {
             "word_count": words_count,
@@ -280,8 +287,8 @@ def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User
         version_no=ver_no,
         text=seg_text,
         segment_url=seg_url,
-        db=float(energy.get("mean_rms", 0.0)),  # mean_rms를 dB로 사용
-        pitch_mean_hz=float(pitch.get("mean_st", 0.0)),  # semitone을 Hz로 저장 (실제로는 semitone이지만 호환성 유지)
+        db=float(energy.get("mean_db", 0.0)),    # [FIX] Use mean_db
+        pitch_mean_hz=float(pitch.get("mean_hz", 0.0)), # [FIX] Use mean_hz (now calculated)
         rate_wpm=float(wpm.get("rate_wpm", 0.0)),
         pause_ratio=0.0,  # 새로운 구조에는 없음
         prosody_score=0.0,  # 새로운 구조에는 없음
