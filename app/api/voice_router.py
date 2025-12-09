@@ -95,12 +95,35 @@ async def analyze_voice(
 
 
 @router.post("/segment/{segment_id}/re_record")
-def re_record(segment_id: int,
+async def re_record(segment_id: int,
               file: UploadFile = File(...),
               db_list: Optional[str] = Form(None, description="0.1초 간격으로 측정된 dB 값 리스트 (JSON 문자열)"),
               db: Session = Depends(get_session),
               user: User = Depends(get_current_user)):
-    result = re_record_segment(db, segment_id, file, user, db_list)
+    """
+    세그먼트 재녹음 (인증 필요)
+    - 진행률 추적: GET /voice/progress/{user_id} (SSE)로 실시간 진행률 확인 가능
+    """
+    # 진행률 콜백 함수
+    def update_progress(percentage: int):
+        progress_store[user.id] = percentage
+
+    # 초기화
+    progress_store[user.id] = 0
+    
+    # 파일을 미리 읽어서 바이트로 변환
+    file_content = await file.read()
+    
+    # 동기 함수를 별도 스레드에서 실행
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: re_record_segment(db, file, segment_id, user, db_list, update_progress, file_content)
+        )
+    finally:
+        pass
+    
     return result
 
 @router.post("/synthesize/{voice_id}/")

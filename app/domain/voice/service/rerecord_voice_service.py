@@ -1,7 +1,7 @@
 import os
 import tempfile
 import json
-from typing import Optional, List
+from typing import Optional, List, Callable
 
 import librosa
 import numpy as np
@@ -41,7 +41,10 @@ def _next_version_no(db: Session, segment_id: int) -> int:
     return (last.version_no + 1) if last else 1
 
 
-def re_record_segment(db: Session, segment_id: int, file: UploadFile, user: User, db_list_str: Optional[str] = None):
+def re_record_segment(db: Session, file: UploadFile, segment_id: int, user: User, db_list_str: Optional[str] = None, progress_callback: Optional[Callable[[int], None]] = None, file_content: bytes = None):
+    if progress_callback:
+        progress_callback(10)  # 시작: 10%
+    
     seg = db.query(VoiceSegment).filter(VoiceSegment.id == segment_id).first()
     
     if not seg:
@@ -52,15 +55,27 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile, user: User
 
     ext_with_dot = os.path.splitext(file.filename)[1]  # ".m4a"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext_with_dot) as tmp:
-        tmp.write(file.file.read())
+        if file_content:
+            tmp.write(file_content)
+        else:
+            tmp.write(file.file.read())
         tmp_path = tmp.name
+
+    if progress_callback:
+        progress_callback(20)  # 파일 저장 완료: 20%
 
     ver_no = _next_version_no(db, segment_id)
     object_name = f"voices/{seg.voice_id}/segments/{seg.id}/v{ver_no}"
     seg_url = upload_file(tmp_path, object_name)
 
+    if progress_callback:
+        progress_callback(30)  # Object Storage 업로드 완료: 30%
+
     # Clova Speech API로 STT 수행
     clova_result = make_voice_to_stt(tmp_path)
+    
+    if progress_callback:
+        progress_callback(40)  # Clova Speech 완료: 40%
     full_text = clova_result["text"]
     clova_words = clova_result.get("words", [])  # Clova Speech의 word timestamps
     
@@ -230,8 +245,14 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile, user: User
     # 문단별 인덱스 맵 생성 (한 문장만 있으므로 간단하게)
     paragraph_index = make_part_index_map([segment_info])
 
+    if progress_callback:
+        progress_callback(70)  # 오디오 분석 완료: 70%
+
     # 피드백 생성
     feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback([segment_info], paragraph_index)
+    
+    if progress_callback:
+        progress_callback(80)  # 피드백 생성 완료: 80%
     
     # 피드백 추출 (한 문장만 있으므로 첫 번째 피드백 사용)
     feedback_text = ""
@@ -269,8 +290,14 @@ def re_record_segment(db: Session, segment_id: int, file: UploadFile, user: User
     )
     db.add(version)
 
+    if progress_callback:
+        progress_callback(90)  # DB 저장 중: 90%
+
     db.commit()
     db.refresh(version)
+
+    if progress_callback:
+        progress_callback(100)  # 완료: 100%
 
     return {
         "id": version.id,

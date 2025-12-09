@@ -21,7 +21,7 @@ class CompletionExecutor:
             'Accept': 'text/event-stream'
         }
 
-        collected_text = ""
+        result_content = None  # 초기화
 
         with requests.post(self._host + '/v1/chat-completions/HCX-003',
                            headers=headers, json=completion_request, stream=True) as r:
@@ -50,7 +50,7 @@ class CompletionExecutor:
                     except json.JSONDecodeError:
                         pass
 
-        return result_content
+        return result_content if result_content is not None else ""
 
 def get_sentence_feedback_from_LLM(sentence_info: dict):
     completion_executor = CompletionExecutor(
