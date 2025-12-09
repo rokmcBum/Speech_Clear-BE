@@ -95,7 +95,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     original_url = upload_file(tmp_path, object_name)
 
     clova_result = make_voice_to_stt(tmp_path)
-    print(clova_result)
+
     full_text = clova_result["text"]
     clova_words = clova_result.get("words", [])  # Clova Speech의 word timestamps
     
@@ -393,7 +393,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             end_time=float(analyzed_seg["end"]),      # 초 단위
             segment_url=seg_url,
             db=float(energy.get("mean_rms", 0.0)),  # mean_rms를 dB로 사용
-            pitch_mean_hz=float(pitch.get("mean_hz", 0.0)),
+            pitch_mean_hz=float(pitch.get("mean_st", 0.0)),
             rate_wpm=float(wpm.get("rate_wpm", 0.0)),
             pause_ratio=0.0,  # 새로운 구조에는 없음
             prosody_score=0.0,  # 새로운 구조에는 없음
