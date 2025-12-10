@@ -54,7 +54,7 @@ def update_matrix(matrix, feature_name, label_value):
 
     return matrix
 
-def make_feedback(segments:list, paragraph_index:dict):
+def make_feedback(segments:list):
     # # JSON 파일 로드
     # with open("result1.json", "r", encoding="utf-8") as f:
     #     result = json.load(f)
@@ -62,7 +62,6 @@ def make_feedback(segments:list, paragraph_index:dict):
     index = 0
     sentence_feedback = []
     
-    paragraph_analysis = []
     # n x 5 x 5 카운트 매트릭스 (초기 0)
     matrix_5x5 = np.zeros((5, 5), dtype=int)
 
