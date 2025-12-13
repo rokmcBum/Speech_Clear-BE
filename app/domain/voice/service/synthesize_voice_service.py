@@ -1,5 +1,6 @@
 import os
 import tempfile
+from typing import List, Dict, Optional
 from pydub import AudioSegment
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import upload_file, download_file
 
 
-def synthesize_voice(voice_id: int, db: Session, user: User):
+def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optional[List[Dict]] = None):
     # voice 소유권 검증
     original_voice = verify_voice_ownership(voice_id, user, db)
     
@@ -28,18 +29,53 @@ def synthesize_voice(voice_id: int, db: Session, user: User):
             detail="해당 음성에는 세그먼트가 없습니다."
         )
 
+    # selections를 딕셔너리로 변환 (segment_id -> selected_version_index)
+    selections_map = {}
+    if selections:
+        for sel in selections:
+            segment_id = sel.get("segment_id")
+            selected_version_index = sel.get("selected_version_index")
+            if segment_id is not None and selected_version_index is not None:
+                selections_map[segment_id] = selected_version_index
+
     final_segments = []
     for voice_segment in voice_segments:
-        selected_ver = (
-            db.query(VoiceSegmentVersion)
-            .filter(VoiceSegmentVersion.segment_id == voice_segment.id)
-            .order_by(VoiceSegmentVersion.version_no.desc())
-            .first()
-        )
-        if selected_ver:
-            final_segments.append(selected_ver.segment_url)
-        else:
+        segment_id = voice_segment.id
+        selected_version_index = selections_map.get(segment_id)
+        
+        if selected_version_index is None:
+            # selections에 없는 경우, 기존 로직대로 최신 버전 사용
+            selected_ver = (
+                db.query(VoiceSegmentVersion)
+                .filter(VoiceSegmentVersion.segment_id == segment_id)
+                .order_by(VoiceSegmentVersion.version_no.desc())
+                .first()
+            )
+            if selected_ver:
+                final_segments.append(selected_ver.segment_url)
+            else:
+                final_segments.append(voice_segment.segment_url)
+        elif selected_version_index == -1:
+            # 원본 사용
             final_segments.append(voice_segment.segment_url)
+        else:
+            # 재녹음 버전 사용 (selected_version_index: 0=첫 번째, 1=두 번째, ...)
+            # version_no는 1부터 시작하므로 selected_version_index + 1 = version_no
+            target_version_no = selected_version_index + 1
+            selected_ver = (
+                db.query(VoiceSegmentVersion)
+                .filter(
+                    VoiceSegmentVersion.segment_id == segment_id,
+                    VoiceSegmentVersion.version_no == target_version_no
+                )
+                .first()
+            )
+            if selected_ver:
+                final_segments.append(selected_ver.segment_url)
+            else:
+                # 요청한 버전이 없으면 원본 사용
+                print(f"[WARN] segment_id={segment_id}의 version_no={target_version_no}이 없습니다. 원본을 사용합니다.")
+                final_segments.append(voice_segment.segment_url)
 
     if not final_segments:
         raise HTTPException(

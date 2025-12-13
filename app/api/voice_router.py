@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -127,10 +127,22 @@ async def re_record(segment_id: int,
     return result
 
 @router.post("/synthesize/{voice_id}/")
-def synthesize_speech(voice_id: int,
-              db: Session = Depends(get_session),
-                      user: User = Depends(get_current_user)):
-    result = synthesize_voice(voice_id, db, user)
+def synthesize_speech(
+    voice_id: int,
+    body: dict = Body(...),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """
+    음성 합성
+    Body: {
+        "selections": [
+            {"segment_id": int, "selected_version_index": int},  # -1: 원본, 0: 첫 번째 재녹음, 1: 두 번째 재녹음, ...
+        ]
+    }
+    """
+    selections = body.get("selections", [])
+    result = synthesize_voice(voice_id, db, user, selections)
     return result
 
 
