@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 from starlette import status
 
 from app.domain.llm.service import make_feedback_service
+from app.domain.llm.service.make_feedback_service import make_re_recording_feedback
 from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceSegmentVersion
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
-from app.infrastructure.storage.object_storage import upload_file
+from app.infrastructure.storage.object_storage import upload_file, download_file
 from app.utils.analyzer_function import (
     compute_energy_stats_segment,
     compute_final_boundary_features_for_segment,
@@ -271,22 +272,181 @@ def re_record_segment(
             }
         })
 
-    # 문단별 인덱스 맵 생성 (한 문장만 있으므로 간단하게)
-    paragraph_index = make_part_index_map([segment_info])
-
     if progress_callback:
-        progress_callback(70)  # 오디오 분석 완료: 70%
+        progress_callback(70)  # 재녹음 오디오 분석 완료: 70%
 
-    # 피드백 생성
-    feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback([segment_info], paragraph_index)
-    
-    if progress_callback:
-        progress_callback(80)  # 피드백 생성 완료: 80%
-    
-    # 피드백 추출 (한 문장만 있으므로 첫 번째 피드백 사용)
+    # 원본 voice의 전체 segments를 분석하여 sentence_feedback 생성
+    original_audio_path = None
     feedback_text = ""
-    if feedbacks_list and len(feedbacks_list) > 0:
-        feedback_text = feedbacks_list[0].get("feedback", "")
+    
+    try:
+        # 원본 오디오 파일 다운로드
+        original_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(voice.filename)[1]).name
+        download_file(voice.original_url, original_audio_path)
+        
+        if progress_callback:
+            progress_callback(75)  # 원본 오디오 다운로드 완료: 75%
+        
+        # 원본 voice의 모든 segments 조회
+        original_segments = (
+            db.query(VoiceSegment)
+            .filter(VoiceSegment.voice_id == voice.id)
+            .order_by(VoiceSegment.order_no.asc())
+            .all()
+        )
+        
+        # 원본 오디오 분석
+        original_clova_result = make_voice_to_stt(original_audio_path)
+        original_clova_words = original_clova_result.get("words", [])
+        
+        # 원본 오디오 로드
+        y_orig, sr_orig = librosa.load(original_audio_path, sr=16000)
+        frame_length = 2048
+        hop_length = 256
+        
+        # RMS 및 F0 계산
+        rms_orig = librosa.feature.rms(y=y_orig, frame_length=frame_length, hop_length=hop_length)[0]
+        f0_orig, _, _ = librosa.pyin(y_orig, fmin=80, fmax=300, frame_length=frame_length, hop_length=hop_length, sr=sr_orig)
+        
+        # 프레임 시간
+        frame_idx_orig = np.arange(rms_orig.shape[0])
+        frame_times_orig = (frame_idx_orig * hop_length + hop_length / 2.0) / sr_orig
+        
+        # 원본 segments를 final_segments 형식으로 변환
+        final_segments_orig = []
+        for orig_seg in original_segments:
+            # DB에 저장된 segments의 시간 정보 사용
+            seg_start_ms = int(orig_seg.start_time * 1000) if orig_seg.start_time else 0
+            seg_end_ms = int(orig_seg.end_time * 1000) if orig_seg.end_time else 0
+            
+            # 해당 시간 범위의 words 찾기
+            words_in_seg = []
+            for w in original_clova_words:
+                w_start_ms = int(w[0]) if isinstance(w[0], (int, float)) else 0
+                w_end_ms = int(w[1]) if isinstance(w[1], (int, float)) else 0
+                if w_start_ms >= seg_start_ms and w_end_ms <= seg_end_ms:
+                    words_in_seg.append([w_start_ms, w_end_ms, w[2]])
+            
+            final_segments_orig.append({
+                "start": seg_start_ms,
+                "end": seg_end_ms,
+                "text": orig_seg.text if orig_seg.text else "",
+                "words": words_in_seg,
+                "part": orig_seg.part if orig_seg.part else None
+            })
+        
+        # 유성 마스크 생성
+        full_voice_masked_orig = get_voiced_mask_from_words(rms_orig, sr_orig, hop_length, final_segments_orig)
+        
+        # 원본 segments 분석
+        analyzed_orig = []
+        for idx, seg_item in enumerate(final_segments_orig):
+            seg_start = seg_item["start"] / 1000.0
+            seg_end = seg_item["end"] / 1000.0
+            seg_text = seg_item["text"].strip()
+            
+            y_seg_orig = (frame_times_orig >= seg_start) & (frame_times_orig <= seg_end)
+            seg_voice_masked_orig = y_seg_orig & full_voice_masked_orig
+            
+            rms_seg_orig = rms_orig[seg_voice_masked_orig]
+            f0_seg_orig = f0_orig[seg_voice_masked_orig]
+            
+            mean_r, std_r, cv_energy = compute_energy_stats_segment(rms_seg_orig, silence_thresh=1e-6)
+            mean_st, std_st, cv_pitch = compute_pitch_cv_segment(f0_hz=f0_seg_orig, f0_min=1e-3)
+            
+            seg_frame_idx = np.arange(rms_orig[y_seg_orig].shape[0])
+            seg_frame_times = (seg_frame_idx * hop_length + hop_length / 2.0) / sr_orig
+            
+            final_rms_ratio, final_rms_slope, final_pitch_semitone_drop, final_pitch_semitone_slope = compute_final_boundary_features_for_segment(
+                rms=rms_orig[y_seg_orig],
+                f0_hz=f0_orig[y_seg_orig],
+                voice_masked=full_voice_masked_orig[y_seg_orig],
+                frame_times=seg_frame_times,
+                seg_length=seg_end - seg_start
+            )
+            
+            words_count = len(seg_text.split())
+            duration_min = (seg_end - seg_start) / 60
+            rate_wpm = words_count / duration_min if duration_min > 0 else 0
+            
+            mean_db = 0.0
+            if len(rms_seg_orig) > 0:
+                mean_db = float(np.mean(librosa.amplitude_to_db(rms_seg_orig, ref=1.0)))
+            
+            mean_hz = 0.0
+            valid_f0 = f0_seg_orig[f0_seg_orig > 1e-3]
+            if len(valid_f0) > 0:
+                mean_hz = float(np.mean(valid_f0))
+            
+            segment_info_orig = {
+                "id": idx,
+                "part": seg_item.get("part"),
+                "text": seg_text,
+                "start": seg_start,
+                "end": seg_end,
+                "energy": {
+                    "mean_rms": safe_float(mean_r),
+                    "std_rms": safe_float(std_r),
+                    "cv": safe_float(cv_energy),
+                    "mean_db": safe_float(mean_db)
+                },
+                "pitch": {
+                    "mean_st": safe_float(mean_st),
+                    "std_st": safe_float(std_st),
+                    "cv": safe_float(cv_pitch),
+                    "mean_hz": safe_float(mean_hz)
+                },
+                "wpm": {
+                    "word_count": words_count,
+                    "rate_wpm": safe_float(rate_wpm),
+                    "duration_sec": safe_float(seg_end - seg_start)
+                },
+                "final_boundary": {
+                    "final_rms_ratio": safe_float(final_rms_ratio),
+                    "final_rms_slope": safe_float(final_rms_slope),
+                    "final_pitch_semitone_drop": safe_float(final_pitch_semitone_drop),
+                    "final_pitch_semitone_slope": safe_float(final_pitch_semitone_slope)
+                },
+                "words": []
+            }
+            analyzed_orig.append(segment_info_orig)
+        
+        # 원본 voice의 sentence_feedback 생성
+        paragraph_index_orig = make_part_index_map(final_segments_orig)
+        sentence_feedback, _ = make_feedback_service.make_feedback(analyzed_orig, paragraph_index_orig)
+        
+        if progress_callback:
+            progress_callback(80)  # 원본 오디오 분석 완료: 80%
+        
+        # 재녹음 피드백 생성 (make_re_recording_feedback 사용)
+        segment_order_no = seg.order_no - 1  # id는 0부터 시작
+        feedback_text, re_analyzed_metrics = make_re_recording_feedback(
+            sentence_feedback=sentence_feedback,
+            id=segment_order_no,
+            re_recording_path=tmp_path
+        )
+        
+        if progress_callback:
+            progress_callback(85)  # 재녹음 피드백 생성 완료: 85%
+        
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] 원본 오디오 분석 실패: {e}")
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        # 원본 분석 실패 시 기본 피드백 생성
+        paragraph_index = make_part_index_map([segment_info])
+        feedbacks_list, _ = make_feedback_service.make_feedback([segment_info], paragraph_index)
+        if feedbacks_list and len(feedbacks_list) > 0:
+            feedback_text = feedbacks_list[0].get("feedback", "")
+        else:
+            feedback_text = "재녹음 피드백 분석에 오류가 발생하였습니다."
+    finally:
+        # 원본 오디오 임시 파일 정리
+        if original_audio_path and os.path.exists(original_audio_path):
+            try:
+                os.remove(original_audio_path)
+            except Exception as e:
+                print(f"⚠️ 원본 오디오 임시 파일 삭제 실패: {e}")
 
     # dB_list는 frontend에서 받은 값을 그대로 사용
     dB_list = []
@@ -319,12 +479,6 @@ def re_record_segment(
         # fallback: mean_db 사용
         real_db = safe_float(energy.get("mean_db", 0.0))
     
-    mean_st = pitch.get("mean_st", 0.0)
-    if mean_st and not np.isnan(mean_st) and mean_st != 0.0:
-        real_hz = 55.0 * (2 ** (mean_st / 12.0))
-    else:
-        # fallback: mean_hz가 이미 Hz 값이므로 그대로 사용
-        real_hz = safe_float(pitch.get("mean_hz", 0.0))
     # real_hz 계산: mean_hz가 이미 Hz 값이므로 그대로 사용
     real_hz = safe_float(pitch.get("mean_hz", 0.0))
     

@@ -469,6 +469,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
                 "end": safe_float(seg.end_time),
                 "segment_url": seg.segment_url if seg.segment_url else "",
                 "feedback": seg.feedback if seg.feedback else "",
+                "dB_list": seg.db_list if seg.db_list else [],  # 0.1초 간격으로 측정된 dB 값 리스트
                 "metrics": {
                     "dB": safe_float(seg.db),
                     "pitch_mean_hz": safe_float(seg.pitch_mean_hz),
