@@ -11,6 +11,9 @@ from app.domain.voice.model.voice import (
     VoiceParagraphFeedback,
     VoiceSegment,
 )
+from sqlalchemy.orm import Session
+
+from app.domain.voice.model.voice import Voice, VoiceParagraphFeedback, VoiceSegment
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import download_file
 

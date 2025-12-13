@@ -1,4 +1,5 @@
-from typing import List, Dict, Any
+from typing import Dict, Any
+from numpy.typing import NDArray
 import numpy as np
 
 # ===== 공통 유틸 함수들 =====
@@ -524,127 +525,134 @@ def classify_pitch_ending(final_pitch_drop: str,
 def _ratio(count: int, total: int) -> float:
     return count / total if total > 0 else 0.0
 
-def classify_paragraph_feedback(paragraph_stats: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def classify_total_label_from_matrix(mat: NDArray[Any]) -> Dict[str, str]:
     """
-    matrix_5x5 구조:
-      row 0: volume_stability  [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
-      row 1: volume_pattern    [STABLE_CLEAR, NATURAL_SOFT, STRONG_FADE, RISING, MIXED]
-      row 2: pitch_stability   [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
-      row 3: pitch_ending      [QUESTION_LIKE, FLAT_NEUTRAL, NATURAL_DECL, STRONG_DECL, MIXED]
-      row 4: rate_level        [SLOW, TYPICAL, FAST, UNKNOWN, _]
+    mat: shape (5, 5)의 matrix_5x5
+
+    row 0: volume_stability  [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
+    row 1: volume_pattern    [STABLE_CLEAR, NATURAL_SOFT, STRONG_FADE, RISING, MIXED]
+    row 2: pitch_stability   [LOW_VAR, NORMAL_VAR, HIGH_VAR, UNKNOWN, _]
+    row 3: pitch_ending      [QUESTION_LIKE, FLAT_NEUTRAL, NATURAL_DECL, STRONG_DECL, MIXED]
+    row 4: rate_level        [SLOW, TYPICAL, FAST, UNKNOWN, _]
+
+    반환:
+    {
+        "volume_stability": str,  # "stable" / "moderate" / "unstable"
+        "ending_pattern": str,    # "mostly_weak" / "mostly_clear" / "mixed"
+        "pitch_stability": str,   # "flat" / "balanced" / "very_dynamic"
+        "pitch_ending": str,      # "mostly_falling" / "mostly_flat" / "many_rising" / "mixed"
+        "rate_level": str         # "mostly_slow" / "mostly_normal" / "mostly_fast"
+    }
     """
-    paragraph_labelings = []
-    for item in paragraph_stats:
-        part = item["part"]
-        mat  = item["matrix"]
 
-        # 1) volume_stability → stable / moderate / unstable
-        vs = mat[0]
-        vs_total = sum(vs[:3])  # LOW, NORMAL, HIGH만
-        vs_low, vs_norm, vs_high = vs[0], vs[1], vs[2]
+    mat = np.asarray(mat)
+    if mat.shape[0] < 5 or mat.shape[1] < 5:
+        raise ValueError("matrix_5x5는 최소 (5, 5) shape이어야 합니다.")
 
-        r_low = _ratio(vs_low, vs_total)
-        r_norm = _ratio(vs_norm, vs_total)
-        r_high = _ratio(vs_high, vs_total)
+    # 1) volume_stability → stable / moderate / unstable
+    vs = mat[0]
+    vs_low, vs_norm, vs_high = int(vs[0]), int(vs[1]), int(vs[2])
+    vs_total = vs_low + vs_norm + vs_high
 
-        if r_high >= 0.4:
-            volume_stability = "unstable"
-        elif r_norm >= 0.4:
-            volume_stability = "moderate"
-        else:
-            # 대부분 LOW_VAR이거나 섞여 있지만 HIGH_VAR는 적을 때
-            volume_stability = "stable"
+    r_low  = _ratio(vs_low, vs_total)
+    r_norm = _ratio(vs_norm, vs_total)
+    r_high = _ratio(vs_high, vs_total)
 
-        # 2) volume_pattern → mostly_weak / mostly_clear / mixed
-        vp = mat[1]
-        vp_stable_clear  = vp[0]
-        vp_natural_soft  = vp[1]
-        vp_strong_fade   = vp[2]
-        vp_rising        = vp[3]
-        vp_mixed         = vp[4]
+    if r_high >= 0.4:
+        volume_stability = "unstable"
+    elif r_norm >= 0.4:
+        volume_stability = "moderate"
+    else:
+        # 대부분 LOW_VAR이거나 섞여 있지만 HIGH_VAR는 적을 때
+        volume_stability = "stable"
 
-        weak_count  = vp_strong_fade                # 힘 확 빠지는 종결
-        clear_count = vp_stable_clear + vp_natural_soft
-        # rising + mixed는 중립/혼합으로 두고 비율 계산에서 같이 포함
-        vp_total = weak_count + clear_count + vp_rising + vp_mixed
+    # 2) volume_pattern → mostly_weak / mostly_clear / mixed
+    vp = mat[1]
+    vp_stable_clear  = int(vp[0])
+    vp_natural_soft  = int(vp[1])
+    vp_strong_fade   = int(vp[2])
+    vp_rising        = int(vp[3])
+    vp_mixed         = int(vp[4])
 
-        r_weak  = _ratio(weak_count, vp_total)
-        r_clear = _ratio(clear_count, vp_total)
+    weak_count  = vp_strong_fade                   # 힘 확 빠지는 종결
+    clear_count = vp_stable_clear + vp_natural_soft
+    vp_total    = weak_count + clear_count + vp_rising + vp_mixed
 
-        if r_weak >= 0.5:
-            volume_pattern = "mostly_weak"
-        elif r_clear >= 0.5:
-            volume_pattern = "mostly_clear"
-        else:
-            volume_pattern = "mixed"
+    r_weak  = _ratio(weak_count, vp_total)
+    r_clear = _ratio(clear_count, vp_total)
 
-        # 3) pitch_stability → flat / balanced / very_dynamic
-        ps = mat[2]
-        ps_total = sum(ps[:3])
-        ps_low, ps_norm, ps_high = ps[0], ps[1], ps[2]
+    if r_weak >= 0.5:
+        volume_pattern = "mostly_weak"
+    elif r_clear >= 0.5:
+        volume_pattern = "mostly_clear"
+    else:
+        volume_pattern = "mixed"
 
-        r_p_low  = _ratio(ps_low, ps_total)
-        r_p_norm = _ratio(ps_norm, ps_total)
-        r_p_high = _ratio(ps_high, ps_total)
+    # 3) pitch_stability → flat / balanced / very_dynamic
+    ps = mat[2]
+    ps_low, ps_norm, ps_high = int(ps[0]), int(ps[1]), int(ps[2])
+    ps_total = ps_low + ps_norm + ps_high
 
-        if r_p_high >= 0.4:
-            pitch_stability = "very_dynamic"
-        elif r_p_low >= 0.4:
-            pitch_stability = "flat"
-        else:
-            pitch_stability = "balanced"
+    r_p_low  = _ratio(ps_low, ps_total)
+    r_p_norm = _ratio(ps_norm, ps_total)
+    r_p_high = _ratio(ps_high, ps_total)
 
-        # 4) pitch_ending → mostly_falling / mostly_flat / many_rising / mixed
-        pe = mat[3]
-        pe_qlike   = pe[0]  # QUESTION_LIKE → rising
-        pe_flat    = pe[1]  # FLAT_NEUTRAL
-        pe_nat     = pe[2]  # NATURAL_DECL
-        pe_strong  = pe[3]  # STRONG_DECL
-        pe_mixed   = pe[4]
+    if r_p_high >= 0.4:
+        pitch_stability = "very_dynamic"
+    elif r_p_low >= 0.4:
+        pitch_stability = "flat"
+    else:
+        pitch_stability = "balanced"
 
-        rising_cnt  = pe_qlike
-        falling_cnt = pe_nat + pe_strong
-        flat_cnt    = pe_flat
+    # 4) pitch_ending → mostly_falling / mostly_flat / many_rising / mixed
+    pe = mat[3]
+    pe_qlike  = int(pe[0])  # QUESTION_LIKE → rising
+    pe_flat   = int(pe[1])  # FLAT_NEUTRAL
+    pe_nat    = int(pe[2])  # NATURAL_DECL
+    pe_strong = int(pe[3])  # STRONG_DECL
+    pe_mixed  = int(pe[4])
 
-        pe_total = rising_cnt + falling_cnt + flat_cnt + pe_mixed
+    rising_cnt  = pe_qlike
+    falling_cnt = pe_nat + pe_strong
+    flat_cnt    = pe_flat
 
-        r_rising  = _ratio(rising_cnt, pe_total)
-        r_falling = _ratio(falling_cnt, pe_total)
-        r_flat    = _ratio(flat_cnt, pe_total)
+    pe_total = rising_cnt + falling_cnt + flat_cnt + pe_mixed
 
-        if r_rising >= 0.5:
-            pitch_ending = "many_rising"
-        elif r_falling >= 0.5:
-            pitch_ending = "mostly_falling"
-        elif r_flat >= 0.5:
-            pitch_ending = "mostly_flat"
-        else:
-            pitch_ending = "mixed"
+    r_rising  = _ratio(rising_cnt, pe_total)
+    r_falling = _ratio(falling_cnt, pe_total)
+    r_flat    = _ratio(flat_cnt, pe_total)
 
-        # 5) rate_level → mostly_slow / mostly_normal / mostly_fast
-        rl = mat[4]
-        slow, typical, fast = rl[0], rl[1], rl[2]
-        rl_total = slow + typical + fast
+    if r_rising >= 0.5:
+        pitch_ending = "many_rising"
+    elif r_falling >= 0.5:
+        pitch_ending = "mostly_falling"
+    elif r_flat >= 0.5:
+        pitch_ending = "mostly_flat"
+    else:
+        pitch_ending = "mixed"
 
-        r_slow    = _ratio(slow, rl_total)
-        r_typical = _ratio(typical, rl_total)
-        r_fast    = _ratio(fast, rl_total)
+    # 5) rate_level → mostly_slow / mostly_normal / mostly_fast
+    rl = mat[4]
+    slow, typical, fast = int(rl[0]), int(rl[1]), int(rl[2])
+    rl_total = slow + typical + fast
 
-        if r_fast >= 0.5:
-            rate_level = "mostly_fast"
-        elif r_slow >= 0.5:
-            rate_level = "mostly_slow"
-        else:
-            # typical 비율이 가장 크거나,
-            # slow/fast가 섞여 있어도 보통은 "정상 범위"로 본다
-            rate_level = "mostly_normal"
+    r_slow    = _ratio(slow, rl_total)
+    r_typical = _ratio(typical, rl_total)
+    r_fast    = _ratio(fast, rl_total)
 
-        paragraph_labelings.append({
-            "part": part,
-            "volume_stability": volume_stability,
-            "ending_pattern": volume_pattern,
-            "pitch_stability": pitch_stability,
-            "pitch_ending": pitch_ending,
-            "rate_level": rate_level
-        })
-    return paragraph_labelings
+    if r_fast >= 0.5:
+        rate_level = "mostly_fast"
+    elif r_slow >= 0.5:
+        rate_level = "mostly_slow"
+    else:
+        # typical 비율이 가장 크거나,
+        # slow/fast가 섞여 있어도 보통은 "정상 범위"로 본다
+        rate_level = "mostly_normal"
+
+    return {
+        "volume_stability": volume_stability,
+        "ending_pattern":   volume_pattern,
+        "pitch_stability":  pitch_stability,
+        "pitch_ending":     pitch_ending,
+        "rate_level":       rate_level,
+    }
