@@ -9,6 +9,7 @@ from app.domain.user.model.user import User
 from app.domain.user.service.login_user_service import login
 from app.domain.user.service.register_user_service import register_user
 from app.domain.user.service.check_email_service import check_email_availability
+from app.domain.user.service.delete_user_service import delete_user
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -89,3 +90,16 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "name": decrypt_text(current_user.name),
         "email": current_user.email
     }
+
+
+@router.delete("/me")
+async def delete_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    """
+    회원 탈퇴 (인증 필요)
+    - CASCADE로 categories, voices, segments, versions 등이 자동 삭제됨
+    """
+    result = delete_user(current_user, db)
+    return result
