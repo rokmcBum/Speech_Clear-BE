@@ -13,6 +13,7 @@ from app.domain.voice.service.synthesize_voice_service import synthesize_voice
 from app.domain.voice.service.upload_voice_service import process_voice
 from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.domain.voice.service.get_voice_service import get_voice
+from app.domain.voice.service.delete_voice_service import delete_voice
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -159,4 +160,19 @@ def get_voice_detail(
     - category_id가 NULL이면 category_name은 "모든 speeches"
     """
     result = get_voice(voice_id, db, user)
+    return result
+
+
+@router.delete("/{voice_id}")
+def delete_voice_endpoint(
+    voice_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """
+    음성 삭제 (인증 필요)
+    - 소유권 검증 후 삭제
+    - CASCADE로 segments, versions 등이 자동 삭제됨
+    """
+    result = delete_voice(voice_id, user, db)
     return result
