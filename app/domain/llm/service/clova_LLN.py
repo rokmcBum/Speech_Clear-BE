@@ -21,36 +21,49 @@ class CompletionExecutor:
             'Accept': 'text/event-stream'
         }
 
-        collected_text = ""
+        result_content = None
+        collected_content = ""
 
-        with requests.post(self._host + '/v1/chat-completions/HCX-003',
-                           headers=headers, json=completion_request, stream=True) as r:
-            for line in r.iter_lines():
-                if not line:
-                    continue
+        try:
+            with requests.post(self._host + '/v1/chat-completions/HCX-003',
+                               headers=headers, json=completion_request, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                
+                for line in r.iter_lines():
+                    if not line:
+                        continue
 
-                decoded = line.decode("utf-8").strip()
+                    decoded = line.decode("utf-8").strip()
 
-                # ✅ 스트리밍 종료
-                if decoded in ["data:[DONE]", "data: [DONE]"]:
-                    break
+                    # ✅ 스트리밍 종료
+                    if decoded in ["data:[DONE]", "data: [DONE]"]:
+                        break
 
-                # ✅ event:result인 경우에만 처리
-                if decoded.startswith("event:result"):
-                    continue  # event 이름은 건너뜀
+                    # ✅ event:result인 경우에만 처리
+                    if decoded.startswith("event:result"):
+                        continue  # event 이름은 건너뜀
 
-                if decoded.startswith("data:"):
-                    try:
-                        data_json = json.loads(decoded.replace("data:", "").strip())
+                    if decoded.startswith("data:"):
+                        try:
+                            data_json = json.loads(decoded.replace("data:", "").strip())
 
-                        # ✅ event:result 데이터만 잡기
-                        if data_json.get("message") and data_json["message"]["role"] == "assistant":
-                            # 최종 결과 저장
-                            result_content = data_json["message"].get("content", None)
-                    except json.JSONDecodeError:
-                        pass
+                            # ✅ event:result 데이터만 잡기
+                            if data_json.get("message") and data_json["message"]["role"] == "assistant":
+                                # 스트리밍 데이터 누적
+                                content = data_json["message"].get("content", "")
+                                if content:
+                                    collected_content += content
+                                    result_content = collected_content
+                        except json.JSONDecodeError:
+                            pass
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] LLM API 요청 실패: {e}")
+            return None
 
-        return result_content
+        # collected_content가 있으면 그것을 사용, 없으면 result_content 사용
+        final_result = collected_content if collected_content else (result_content if result_content else "")
+        print(f"[DEBUG] execute 결과: collected_content 길이={len(collected_content)}, result_content={result_content}, final_result 길이={len(final_result)}")
+        return final_result
 
 def get_sentence_feedback_from_LLM(sentence_info: dict):
     completion_executor = CompletionExecutor(
@@ -272,15 +285,15 @@ def get_re_recording_feedback_from_LLM(original: dict, new: dict):
         - 여전히 보완하면 좋을 아쉬운 지점이 있다면 무엇인지
         를 1~2문장으로 설명해주세요.
 
-        3. 마지막으로, 재녹음을 기반으로 “다음 연습에서 집중하면 좋은 포인트”를 1문장 정도로 제안해주세요.
-        - 예: “이제 말끝 힘이 좋아졌으니, 다음에는 속도 조절에 조금 더 신경 써보면 좋겠다”처럼
+        3. 마지막으로, 재녹음을 기반으로 "다음 연습에서 집중하면 좋은 포인트"를 1문장 정도로 제안해주세요.
+        - 예: "이제 말끝 힘이 좋아졌으니, 다음에는 속도 조절에 조금 더 신경 써보면 좋겠다"처럼
             변화 흐름을 이어가는 방향으로 작성해주세요.
 
         4. JSON 안의 label 이름(예: NORMAL_VAR, VOL_END_STABLE_CLEAR)이나 키 이름은 그대로 반복하지 말고,
         original/new의 comment 차이를 자연스럽게 요약해서 설명해주세요.
 
         5. 문체는 따뜻하고 격려하는 톤으로, 
-        “이번에 이렇게 좋아졌다” → “다음에는 이런 부분을 더 살리면 좋겠다”라는 흐름을 유지해주세요.
+        "이번에 이렇게 좋아졌다" → "다음에는 이런 부분을 더 살리면 좋겠다"라는 흐름을 유지해주세요.
 
         6. 전체 길이는 4~5문장 정도로 작성하되,
         각 문장을 별도 블록으로 나누어 아래 형식으로 출력해주세요.
@@ -307,7 +320,7 @@ def get_re_recording_feedback_from_LLM(original: dict, new: dict):
         - 소제목에는 JSON의 라벨 이름을 직접 쓰지 말고, original과 new의 comment 차이를 한 문구로 압축해 주세요.
 
         [중요]
-        - 이번 피드백의 초점은 “new가 original에서 어떻게 변화했는가”입니다.
+        - 이번 피드백의 초점은 "new가 original에서 어떻게 변화했는가"입니다.
         - 단순히 두 버전을 각각 평가하는 것이 아니라,
         변화 방향(개선 / 유지 / 아쉬운 부분)을 중심으로 설명해 주세요.
         """
@@ -331,10 +344,24 @@ def get_re_recording_feedback_from_LLM(original: dict, new: dict):
 
     # print(preset_text)
     # completion_executor.execute(request_data)
+    print(f"[DEBUG] get_re_recording_feedback_from_LLM 호출됨")
+    print(f"[DEBUG] original: {original}")
+    print(f"[DEBUG] new: {new}")
+    
     answer = completion_executor.execute(request_data)
-    # print(answer)
+    
+    print(f"[DEBUG] LLM execute 결과: type={type(answer)}, value={answer[:200] if answer else 'None'}")
 
     # with open("LLM_result.json", "w", encoding="utf-8") as f:
     #     json.dump(answer, f, ensure_ascii=False, indent=2)
+
+    # answer가 None이거나 빈 문자열인 경우 처리
+    if answer is None:
+        print(f"[WARN] get_re_recording_feedback_from_LLM: LLM 응답이 None입니다.")
+        return ""
+    
+    if isinstance(answer, str) and answer.strip() == "":
+        print(f"[WARN] get_re_recording_feedback_from_LLM: LLM 응답이 빈 문자열입니다.")
+        return ""
 
     return answer

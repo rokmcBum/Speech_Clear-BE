@@ -54,7 +54,7 @@ def update_matrix(matrix, feature_name, label_value):
 
     return matrix
 
-def make_feedback(segments:list):
+def make_feedback(segments:list, paragraph_index: dict = None):
     # # JSON 파일 로드
     # with open("result1.json", "r", encoding="utf-8") as f:
     #     result = json.load(f)
@@ -116,8 +116,9 @@ def make_feedback(segments:list):
         final_rms_ratio = seg["final_boundary"]["final_rms_ratio"]
         final_rms_slope = seg["final_boundary"]["final_rms_slope"]
         if final_rms_ratio == "NaN": # 짧은 문장인 경우
+            vol_end_label = "VOL_END_STABLE_CLEAR"
             analyzed["volume_pattern"]= {
-                "label": "VOL_END_STABLE_CLEAR",
+                "label": vol_end_label,
                 "comment": ""
             }
         else:
@@ -134,8 +135,9 @@ def make_feedback(segments:list):
         final_pitch_semitone_drop = seg["final_boundary"]["final_pitch_semitone_drop"]
         final_pitch_semitone_slope = seg["final_boundary"]["final_pitch_semitone_slope"]
         if final_pitch_semitone_drop == "NaN": # 짧은 문장인 경우
+            pitch_end_label = "PITCH_END_FLAT_NEUTRAL"
             analyzed["pitch_ending"] = {
-                "label": "PITCH_END_FLAT_NEUTRAL",
+                "label": pitch_end_label,
                 "comment": ""
             }
         else:
@@ -179,7 +181,79 @@ def make_feedback(segments:list):
     total_labeling = classify_total_label_from_matrix(matrix_5x5)
     total_comment = get_total_feedback_from_LLM(total_labeling)
 
-    return sentence_feedback, total_comment
+    # 문단별 피드백 생성
+    paragraph_feedback = []
+    if paragraph_index:
+        for part, (start_idx, end_idx) in paragraph_index.items():
+            # 해당 문단에 속한 문장들의 분석 결과 추출
+            paragraph_segments = segments[start_idx:end_idx + 1]
+            
+            # 문단별 매트릭스 생성
+            para_matrix = np.zeros((5, 5), dtype=int)
+            para_analyzed_list = []
+            
+            for para_seg in paragraph_segments:
+                # 문단 내 문장 분석
+                para_analyzed = {
+                    "volume_stability": {},
+                    "volume_pattern": {},
+                    "pitch_stability": {},
+                    "pitch_ending": {},
+                    "rate_level": {}
+                }
+                
+                # Volume Stability
+                cv_energy = para_seg["energy"]["cv"]
+                label, _ = classify_energy_cv(cv_energy)
+                para_analyzed["volume_stability"]["label"] = label
+                para_matrix = update_matrix(para_matrix, "volume_stability", label)
+                
+                # Pitch Stability
+                cv_pitch = para_seg["pitch"]["cv"]
+                label, _ = classify_pitch_cv(cv_pitch)
+                para_analyzed["pitch_stability"]["label"] = label
+                para_matrix = update_matrix(para_matrix, "pitch_stability", label)
+                
+                # Rate Level
+                rate_level = para_seg["wpm"]["rate_wpm"]
+                label, _ = classify_rate_wpm(rate_level)
+                para_analyzed["rate_level"]["label"] = label
+                para_matrix = update_matrix(para_matrix, "rate_level", label)
+                
+                # Volume Pattern
+                final_rms_ratio = para_seg["final_boundary"]["final_rms_ratio"]
+                final_rms_slope = para_seg["final_boundary"]["final_rms_slope"]
+                if final_rms_ratio == "NaN":
+                    para_analyzed["volume_pattern"]["label"] = "VOL_END_STABLE_CLEAR"
+                else:
+                    vol_end_label, _ = classify_volume_ending(final_rms_ratio, final_rms_slope)
+                    para_analyzed["volume_pattern"]["label"] = vol_end_label
+                para_matrix = update_matrix(para_matrix, "volume_pattern", para_analyzed["volume_pattern"]["label"])
+                
+                # Pitch Ending
+                final_pitch_semitone_drop = para_seg["final_boundary"]["final_pitch_semitone_drop"]
+                final_pitch_semitone_slope = para_seg["final_boundary"]["final_pitch_semitone_slope"]
+                if final_pitch_semitone_drop == "NaN":
+                    para_analyzed["pitch_ending"]["label"] = "PITCH_END_FLAT_NEUTRAL"
+                else:
+                    pitch_end_label, _ = classify_pitch_ending(final_pitch_semitone_drop, final_pitch_semitone_slope)
+                    para_analyzed["pitch_ending"]["label"] = pitch_end_label
+                para_matrix = update_matrix(para_matrix, "pitch_ending", para_analyzed["pitch_ending"]["label"])
+                
+                para_analyzed_list.append(para_analyzed)
+            
+            # 문단별 총괄 라벨링
+            para_total_labeling = classify_total_label_from_matrix(para_matrix)
+            
+            # 문단별 LLM 피드백 생성
+            para_feedback = get_total_feedback_from_LLM(para_total_labeling)
+            
+            paragraph_feedback.append({
+                "part": part,
+                "feedback": para_feedback if para_feedback else ""
+            })
+    
+    return sentence_feedback, paragraph_feedback
 
 def make_re_recording_feedback(sentence_feedback: list, id: int, re_recording_path: str):
     '''
@@ -403,13 +477,42 @@ def make_re_recording_feedback(sentence_feedback: list, id: int, re_recording_pa
         "rate_level": analyzed["rate_level"]["label"]
     }  ## 디버깅용
 
+    # 원본 세그먼트의 analyzed_metrics 찾기
+    analyzed_metrics = None
+    print(f"[DEBUG] make_re_recording_feedback: 찾는 id={id}, sentence_feedback 개수={len(sentence_feedback)}")
+    print(f"[DEBUG] sentence_feedback ids: {[s['id'] for s in sentence_feedback]}")
+    
     for seg in sentence_feedback:
         if seg["id"] == id:
             analyzed_metrics = seg["analyzed"]
+            print(f"[DEBUG] analyzed_metrics 찾음: {analyzed_metrics}")
+            break
+    
+    # analyzed_metrics를 찾지 못한 경우 에러 처리
+    if analyzed_metrics is None:
+        print(f"[WARN] sentence_feedback에서 id={id}를 찾을 수 없습니다.")
+        print(f"[DEBUG] sentence_feedback 전체: {sentence_feedback}")
+        # 기본값 설정
+        analyzed_metrics = {
+            "volume_stability": "UNKNOWN",
+            "volume_pattern": "VOL_END_MIXED",
+            "pitch_stability": "UNKNOWN",
+            "pitch_ending": "PITCH_END_MIXED",
+            "rate_level": "UNKNOWN"
+        }
 
-    # print(analyzed)
+    print(f"[DEBUG] LLM 호출 전 - original: {analyzed_metrics}, new: {re_analyzed_metrics}")
+    
     # LLM 피드백 생성
     feedback = get_re_recording_feedback_from_LLM(analyzed_metrics, re_analyzed_metrics)
+    
+    print(f"[DEBUG] LLM 응답 받음: feedback type={type(feedback)}, length={len(feedback) if feedback else 0}")
+    print(f"[DEBUG] LLM 응답 내용 (처음 200자): {str(feedback)[:200] if feedback else 'None'}")
+    
+    # feedback이 None이거나 빈 문자열인 경우 처리
+    if feedback is None or (isinstance(feedback, str) and feedback.strip() == ""):
+        print(f"[WARN] LLM 피드백이 비어있습니다. feedback={feedback}")
+        feedback = "재녹음 분석이 완료되었습니다."
 
     return feedback, re_analyzed_metrics
 
