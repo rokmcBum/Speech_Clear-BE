@@ -7,13 +7,7 @@ import librosa
 import numpy as np
 from sqlalchemy.orm import Session, joinedload
 
-from app.domain.voice.model.voice import (
-    VoiceParagraphFeedback,
-    VoiceSegment,
-)
-from sqlalchemy.orm import Session
-
-from app.domain.voice.model.voice import Voice, VoiceParagraphFeedback, VoiceSegment
+from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import download_file
 
@@ -33,16 +27,6 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         .order_by(VoiceSegment.order_no.asc())
         .all()
     )
-    
-    # 문단별 피드백 조회
-    paragraph_feedbacks = (
-        db.query(VoiceParagraphFeedback)
-        .filter(VoiceParagraphFeedback.voice_id == voice_id)
-        .all()
-    )
-    
-    # part별 피드백 매핑
-    paragraph_feedback_map = {pf.part: pf.feedback for pf in paragraph_feedbacks}
     
     # category_name 설정
     if voice.category_id is None:
@@ -145,7 +129,6 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         if current_part is not None and current_part != part:
             scripts.append({
                 "part": current_part,
-                "paragraph_feedback": paragraph_feedback_map.get(current_part, ""),
                 "segments": current_segments
             })
             current_segments = []
@@ -157,7 +140,6 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
     if current_part is not None and current_segments:
         scripts.append({
             "part": current_part,
-            "paragraph_feedback": paragraph_feedback_map.get(current_part, ""),
             "segments": current_segments
         })
     
@@ -173,6 +155,7 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
         "category_name": category_name,
         "voice_created_at": voice.created_at.isoformat() if voice.created_at else None,
         "voice_duration": voice.duration_sec if voice.duration_sec else 0.0,
+        "total_feedback": voice.total_feedback if voice.total_feedback else "",
         "scripts": scripts
     }
 

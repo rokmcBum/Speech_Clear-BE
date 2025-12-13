@@ -16,9 +16,9 @@ class Voice(Base):
     original_url = Column(String, nullable=False)
     duration_sec = Column(Float)
     sentence_feedback = Column(JSONB)  # 원본 voice의 sentence_feedback (재녹음 피드백 생성용)
+    total_feedback = Column(String)  # 전체 음성에 대한 총괄 피드백
     created_at = Column(TIMESTAMP, server_default=func.now())
     segments = relationship("VoiceSegment", back_populates="voice")
-    paragraph_feedbacks = relationship("VoiceParagraphFeedback", back_populates="voice", cascade="all, delete-orphan")
     category = relationship("Category", back_populates="voices")
 
 
@@ -66,14 +66,3 @@ class VoiceSegmentVersion(Base):
     __table_args__ = (
         UniqueConstraint("segment_id", "version_no", name="uq_segment_version"),
     )
-
-
-class VoiceParagraphFeedback(Base):
-    __tablename__ = "voice_paragraph_feedbacks"
-    id = Column(Integer, primary_key=True)
-    voice_id = Column(Integer, ForeignKey("voices.id", ondelete="CASCADE"), nullable=False)
-    part = Column(String(50), nullable=False)  # 문단 구분 (서론, 본론1, 본론2, 결론 등)
-    feedback = Column(String, nullable=False)  # LLM이 생성한 문단별 피드백
-    created_at = Column(TIMESTAMP, server_default=func.now())
-
-    voice = relationship("Voice", back_populates="paragraph_feedbacks")

@@ -353,8 +353,7 @@ def re_record_segment(
         else:
             # sentence_feedback이 없는 경우 (기존 데이터) 기본 피드백 생성
             print(f"[WARN] voice_id={voice.id}에 sentence_feedback이 없습니다. 기본 피드백을 생성합니다.")
-            paragraph_index = make_part_index_map([segment_info])
-            feedbacks_list, _ = make_feedback_service.make_feedback([segment_info], paragraph_index)
+            feedbacks_list, _ = make_feedback_service.make_feedback([segment_info])
             if feedbacks_list and len(feedbacks_list) > 0:
                 feedback_text = feedbacks_list[0].get("feedback", "")
             else:
@@ -369,8 +368,7 @@ def re_record_segment(
         print(f"[ERROR] 재녹음 피드백 생성 실패: {e}")
         print(f"[ERROR] Traceback: {traceback.format_exc()}")
         # 에러 발생 시 기본 피드백 생성
-        paragraph_index = make_part_index_map([segment_info])
-        feedbacks_list, _ = make_feedback_service.make_feedback([segment_info], paragraph_index)
+        feedbacks_list, _ = make_feedback_service.make_feedback([segment_info])
         if feedbacks_list and len(feedbacks_list) > 0:
             feedback_text = feedbacks_list[0].get("feedback", "")
         else:

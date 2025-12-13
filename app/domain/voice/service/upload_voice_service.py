@@ -14,7 +14,7 @@ from app.domain.llm.service import make_feedback_service
 from app.domain.llm.service.classify_text_service import classify_text_into_sections
 from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
-from app.domain.voice.model.voice import Voice, VoiceParagraphFeedback, VoiceSegment
+from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.voice.utils.map_sections_to_segments import (
     split_llm_sections_into_sentences_with_clova_timestamps,
 )
@@ -325,15 +325,12 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             progress_callback(current_progress)  
         analyzed.append(segment_info)
 
-    # 문단별 인덱스 맵 생성
-    paragraph_index = make_part_index_map(final_segments)
-
-    feedbacks_list, paragraph_feedback = make_feedback_service.make_feedback(analyzed, paragraph_index)
+    feedbacks_list, total_feedback = make_feedback_service.make_feedback(analyzed)
 
     # 피드백을 segment_index로 매핑 (id는 0부터 시작)
     feedback_map = {fb["id"]: fb["feedback"] for fb in feedbacks_list}
         # 진행률 업데이트 (50% ~ 90% 사이)
-    # Voice 생성 및 저장 (sentence_feedback도 함께 저장)
+    # Voice 생성 및 저장 (sentence_feedback, total_feedback도 함께 저장)
     voice = Voice(
         user_id=user.id,
         category_id=category_id,
@@ -342,21 +339,11 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         content_type=file.content_type,
         original_url=original_url,
         duration_sec=clova_result.get("duration"),
-        sentence_feedback=feedbacks_list  # 재녹음 피드백 생성을 위해 저장
+        sentence_feedback=feedbacks_list,  # 재녹음 피드백 생성을 위해 저장
+        total_feedback=total_feedback if total_feedback else ""  # 전체 음성 총괄 피드백
     )
     db.add(voice)
-    db.flush()
-
-    # 문단별 피드백 저장
-    for para_fb in paragraph_feedback:
-        paragraph_feedback_obj = VoiceParagraphFeedback(
-            voice_id=voice.id,
-            part=para_fb["part"],
-            feedback=para_fb["feedback"]
-        )
-        db.add(paragraph_feedback_obj)
-    
-    db.flush()  # paragraph_feedback도 flush하여 voice.id 사용 가능하도록
+    db.flush()  # voice.id 사용 가능하도록 flush
     
     # 세그먼트 저장 (object storage + DB)
     audio = AudioSegment.from_file(tmp_path)
