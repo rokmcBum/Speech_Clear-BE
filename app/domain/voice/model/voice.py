@@ -15,6 +15,7 @@ class Voice(Base):
     content_type = Column(String, nullable=False)
     original_url = Column(String, nullable=False)
     duration_sec = Column(Float)
+    sentence_feedback = Column(JSONB)  # 원본 voice의 sentence_feedback (재녹음 피드백 생성용)
     created_at = Column(TIMESTAMP, server_default=func.now())
     segments = relationship("VoiceSegment", back_populates="voice")
     paragraph_feedbacks = relationship("VoiceParagraphFeedback", back_populates="voice", cascade="all, delete-orphan")
@@ -38,6 +39,7 @@ class VoiceSegment(Base):
     prosody_score = Column(Float)
     feedback = Column(String)
     db_list = Column(JSONB)  # 0.1초 간격으로 측정된 dB 값 리스트
+    last_re_analyzed_metrics = Column(JSONB)  # 최신 재녹음 분석 결과 (다음 재녹음 시 원본으로 사용)
 
     voice = relationship("Voice", back_populates="segments")
     versions = relationship("VoiceSegmentVersion", back_populates="segment", cascade="all, delete-orphan")

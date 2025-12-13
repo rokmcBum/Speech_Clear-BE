@@ -333,7 +333,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     # 피드백을 segment_index로 매핑 (id는 0부터 시작)
     feedback_map = {fb["id"]: fb["feedback"] for fb in feedbacks_list}
         # 진행률 업데이트 (50% ~ 90% 사이)
-    # Voice 생성 및 저장
+    # Voice 생성 및 저장 (sentence_feedback도 함께 저장)
     voice = Voice(
         user_id=user.id,
         category_id=category_id,
@@ -341,7 +341,8 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         filename=file.filename,
         content_type=file.content_type,
         original_url=original_url,
-        duration_sec=clova_result.get("duration")
+        duration_sec=clova_result.get("duration"),
+        sentence_feedback=feedbacks_list  # 재녹음 피드백 생성을 위해 저장
     )
     db.add(voice)
     db.flush()

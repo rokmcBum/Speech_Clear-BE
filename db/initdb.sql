@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS voices (
     content_type VARCHAR(100) NOT NULL,
     original_url TEXT NOT NULL,
     duration_sec FLOAT,
+    sentence_feedback JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS voice_segments (
     pause_ratio FLOAT,
     prosody_score FLOAT,
     feedback TEXT,
-    db_list JSONB
+    db_list JSONB,
+    last_re_analyzed_metrics JSONB
     );
 
 CREATE TABLE IF NOT EXISTS voice_segment_versions (
