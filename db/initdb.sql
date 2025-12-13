@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS voice_segments (
     rate_wpm FLOAT,
     pause_ratio FLOAT,
     prosody_score FLOAT,
-    feedback TEXT
+    feedback TEXT,
+    db_list JSONB
     );
 
 CREATE TABLE IF NOT EXISTS voice_segment_versions (
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS voice_segment_versions (
     pause_ratio FLOAT,
     prosody_score FLOAT,
     feedback TEXT,
+    db_list JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_segment_version UNIQUE (segment_id, version_no)
     );

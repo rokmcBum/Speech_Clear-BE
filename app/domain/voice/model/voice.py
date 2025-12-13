@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, TIMESTAMP, ForeignKey, Boolean, func, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from app.infrastructure.db.db import Base
 
@@ -36,6 +37,7 @@ class VoiceSegment(Base):
     pause_ratio = Column(Float)
     prosody_score = Column(Float)
     feedback = Column(String)
+    db_list = Column(JSONB)  # 0.1초 간격으로 측정된 dB 값 리스트
 
     voice = relationship("Voice", back_populates="segments")
     versions = relationship("VoiceSegmentVersion", back_populates="segment", cascade="all, delete-orphan")
@@ -54,6 +56,7 @@ class VoiceSegmentVersion(Base):
     pause_ratio = Column(Float)
     prosody_score = Column(Float)
     feedback = Column(String)
+    db_list = Column(JSONB)  # 0.1초 간격으로 측정된 dB 값 리스트
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     segment = relationship("VoiceSegment", back_populates="versions")

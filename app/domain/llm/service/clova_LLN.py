@@ -53,17 +53,17 @@ class CompletionExecutor:
                                 content = data_json["message"].get("content", "")
                                 if content:
                                     collected_content += content
-                                    result_content = collected_content
                         except json.JSONDecodeError:
                             pass
-        except requests.exceptions.RequestException as e:
-            print(f"[ERROR] LLM API 요청 실패: {e}")
-            return None
+                        except Exception as e:
+                            print(f"⚠️ 데이터 파싱 에러: {e}")
+                            pass
 
-        # collected_content가 있으면 그것을 사용, 없으면 result_content 사용
-        final_result = collected_content if collected_content else (result_content if result_content else "")
-        print(f"[DEBUG] execute 결과: collected_content 길이={len(collected_content)}, result_content={result_content}, final_result 길이={len(final_result)}")
-        return final_result
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ LLM API 요청 에러: {e}")
+            return ""
+
+        return collected_content if collected_content else ""
 
 def get_sentence_feedback_from_LLM(sentence_info: dict):
     completion_executor = CompletionExecutor(
