@@ -1,14 +1,15 @@
 # app/domain/voice/service/get_voice_service.py
+import os
+import tempfile
+from typing import Any, Dict, List
+
 import librosa
 import numpy as np
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
 
-from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceParagraphFeedback
+from app.domain.voice.model.voice import Voice, VoiceParagraphFeedback, VoiceSegment
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
 from app.infrastructure.storage.object_storage import download_file
-import tempfile
-import os
 
 
 def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
@@ -87,7 +88,7 @@ def get_voice(voice_id: int, db: Session, user) -> Dict[str, Any]:
                     chunk = seg_audio[i:i + interval_samples]
                     if len(chunk) > 0:
                         rms = librosa.feature.rms(y=chunk)
-                        db_value = float(np.mean(librosa.amplitude_to_db(rms, ref=np.max)))
+                        db_value = float(np.mean(librosa.amplitude_to_db(rms, ref=1.0)))
                         dB_list.append(round(db_value, 2))
         
         part = seg.part if seg.part else "기타"
