@@ -147,8 +147,22 @@ def re_record_segment(
     y_seg = (frame_times >= seg_start) & (frame_times <= seg_end)
 
     # STT 결과 기반 유성 마스크 생성
+    # seg_words 형식 변환: segments 내부 words는 [start_ms, end_ms, text] 형식
+    words_for_mask = []
+    for w in seg_words:
+        if isinstance(w, list) and len(w) >= 3:
+            # 리스트 형식 [start_ms, end_ms, text]
+            words_for_mask.append([w[0], w[1], w[2]])
+        elif isinstance(w, dict):
+            # 딕셔너리 형식 {"text": ..., "start": ..., "end": ...} (초 단위)
+            words_for_mask.append([
+                int(w.get("start", 0.0) * 1000),  # 밀리초로 변환
+                int(w.get("end", 0.0) * 1000),    # 밀리초로 변환
+                w.get("text", "")
+            ])
+    
     final_segments_for_mask = [{
-        "words": [[w[0], w[1], w[2]] for w in seg_words]  # [start_ms, end_ms, text] 형태
+        "words": words_for_mask
     }]
     full_voice_masked = get_voiced_mask_from_words(rms, sr, hop_length, final_segments_for_mask)
 
@@ -235,8 +249,16 @@ def re_record_segment(
 
     # 단어 단위 분석
     for w in seg_words:
-        w_text = w[2].strip()
-        w_start, w_end = w[0]/1000, w[1]/1000
+        # words 형식 처리: 리스트 [start_ms, end_ms, text] 또는 딕셔너리 {"text": ..., "start": ..., "end": ...}
+        if isinstance(w, list) and len(w) >= 3:
+            w_text = w[2].strip()
+            w_start, w_end = w[0]/1000, w[1]/1000
+        elif isinstance(w, dict):
+            w_text = w.get("text", "").strip()
+            w_start = w.get("start", 0.0)  # 초 단위
+            w_end = w.get("end", 0.0)      # 초 단위
+        else:
+            continue
         w_start_samp, w_end_samp = int(w_start*sr), int(w_end*sr)
         y_word = y[w_start_samp:w_end_samp]
 
@@ -322,10 +344,21 @@ def re_record_segment(
             # 해당 시간 범위의 words 찾기
             words_in_seg = []
             for w in original_clova_words:
-                w_start_ms = int(w[0]) if isinstance(w[0], (int, float)) else 0
-                w_end_ms = int(w[1]) if isinstance(w[1], (int, float)) else 0
+                # words는 {"text": ..., "start": ..., "end": ...} 형식 (초 단위)
+                if isinstance(w, dict):
+                    w_start = w.get("start", 0.0)  # 초 단위
+                    w_end = w.get("end", 0.0)      # 초 단위
+                    w_text = w.get("text", "")
+                    w_start_ms = int(w_start * 1000)  # 밀리초로 변환
+                    w_end_ms = int(w_end * 1000)     # 밀리초로 변환
+                else:
+                    # 리스트 형식 [start_ms, end_ms, text]인 경우 (fallback)
+                    w_start_ms = int(w[0]) if isinstance(w[0], (int, float)) else 0
+                    w_end_ms = int(w[1]) if isinstance(w[1], (int, float)) else 0
+                    w_text = w[2] if len(w) > 2 else ""
+                
                 if w_start_ms >= seg_start_ms and w_end_ms <= seg_end_ms:
-                    words_in_seg.append([w_start_ms, w_end_ms, w[2]])
+                    words_in_seg.append([w_start_ms, w_end_ms, w_text])
             
             final_segments_orig.append({
                 "start": seg_start_ms,
