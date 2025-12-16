@@ -14,6 +14,7 @@ from app.domain.voice.service.upload_voice_service import process_voice
 from app.domain.voice.service.get_my_voices_service import get_my_voices
 from app.domain.voice.service.get_voice_service import get_voice
 from app.domain.voice.service.delete_voice_service import delete_voice
+from app.domain.voice.service.compare_voice_feedback_service import compare_voice_feedback
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -175,4 +176,19 @@ def delete_voice_endpoint(
     - CASCADE로 segments, versions 등이 자동 삭제됨
     """
     result = delete_voice(voice_id, user, db)
+    return result
+
+
+@router.get("/{voice_id}/compare-feedback")
+def compare_feedback_endpoint(
+    voice_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """
+    원본과 합성본의 total_feedback 비교
+    - voice_id가 원본이면 최신 합성본과 비교
+    - voice_id가 합성본이면 원본과 비교
+    """
+    result = compare_voice_feedback(voice_id, user, db)
     return result
