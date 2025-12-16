@@ -63,7 +63,35 @@ class CompletionExecutor:
             print(f"⚠️ LLM API 요청 에러: {e}")
             return ""
 
-        return collected_content if collected_content else ""
+        # 중복 제거: 같은 문장이 연속으로 반복되는 경우 제거
+        if collected_content:
+            lines = collected_content.split('\n')
+            cleaned_lines = []
+            prev_line = None
+            for line in lines:
+                line_stripped = line.strip()
+                if line_stripped and line_stripped != prev_line:
+                    cleaned_lines.append(line)
+                    prev_line = line_stripped
+            
+            # 문장 단위로도 중복 체크
+            sentences = collected_content.split('.')
+            cleaned_sentences = []
+            seen_sentences = set()
+            for sentence in sentences:
+                sentence_stripped = sentence.strip()
+                if sentence_stripped and sentence_stripped not in seen_sentences:
+                    cleaned_sentences.append(sentence_stripped)
+                    seen_sentences.add(sentence_stripped)
+            
+            # 문장 기반 정리 결과가 더 짧으면 사용 (중복이 많이 제거된 경우)
+            cleaned_by_sentences = '. '.join(cleaned_sentences)
+            if cleaned_by_sentences and len(cleaned_by_sentences) < len(collected_content):
+                return cleaned_by_sentences
+            
+            return '\n'.join(cleaned_lines) if cleaned_lines else collected_content
+        
+        return ""
 
 def get_sentence_feedback_from_LLM(sentence_info: dict):
     completion_executor = CompletionExecutor(
