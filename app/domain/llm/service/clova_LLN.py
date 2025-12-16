@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-from dotenv import load_dotenv
-import requests
 import json
 import os
 import uuid
+
+import requests
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -29,6 +30,7 @@ class CompletionExecutor:
                                headers=headers, json=completion_request, stream=True, timeout=60) as r:
                 r.raise_for_status()
                 
+                last_event = None
                 for line in r.iter_lines():
                     if not line:
                         continue
@@ -39,20 +41,33 @@ class CompletionExecutor:
                     if decoded in ["data:[DONE]", "data: [DONE]"]:
                         break
 
-                    # ✅ event:result인 경우에만 처리
-                    if decoded.startswith("event:result"):
-                        continue  # event 이름은 건너뜀
+                    # ✅ event 타입 확인
+                    if decoded.startswith("event:"):
+                        last_event = decoded.replace("event:", "").strip()
+                        print(f"[DEBUG_STREAM] Event: {last_event}")
+                        
+                        # event:result가 시작되면 기존에 모은 토큰(collected_content)을 초기화
+                        # -> 토큰 데이터와 결과 데이터가 중복되는 것을 방지
+                        # -> 결과 데이터만 깔끔하게 사용
+                        if last_event == "result":
+                            print("[DEBUG_STREAM] Reset collected_content for result event")
+                            collected_content = ""
+                        continue
 
                     if decoded.startswith("data:"):
+                        # [DEBUG]
+                        print(f"[DEBUG_STREAM] {decoded[:100]}...") 
+                        
                         try:
                             data_json = json.loads(decoded.replace("data:", "").strip())
 
-                            # ✅ event:result 데이터만 잡기
                             if data_json.get("message") and data_json["message"]["role"] == "assistant":
                                 # 스트리밍 데이터 누적
                                 content = data_json["message"].get("content", "")
                                 if content:
                                     collected_content += content
+                                    # [DEBUG]
+                                    # print(f"[DEBUG_CONTENT] Added: {content}")
                         except json.JSONDecodeError:
                             pass
                         except Exception as e:
