@@ -1,6 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, TIMESTAMP, ForeignKey, Boolean, func, UniqueConstraint
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    Column,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
+
 from app.infrastructure.db.db import Base
 
 
@@ -18,7 +29,7 @@ class Voice(Base):
     sentence_feedback = Column(JSONB)  # 원본 voice의 sentence_feedback (재녹음 피드백 생성용)
     total_feedback = Column(String)  # 전체 음성에 대한 총괄 피드백
     created_at = Column(TIMESTAMP, server_default=func.now())
-    segments = relationship("VoiceSegment", back_populates="voice")
+    segments = relationship("VoiceSegment", back_populates="voice", cascade="all, delete-orphan")
     category = relationship("Category", back_populates="voices")
 
 
