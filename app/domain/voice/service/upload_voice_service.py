@@ -27,6 +27,7 @@ from app.utils.analyzer_function import (
     make_part_index_map,
 )
 
+
 def save_segments_to_storage(local_path, voice_id, segments, db, voice, ext):
     audio = AudioSegment.from_file(local_path)
     saved_segments = []
@@ -84,7 +85,7 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
             tmp.write(file.file.read())
         tmp_path = tmp.name
 
-    object_name = f"voices/{uuid.uuid4()}"
+    object_name = f"voices/{uuid.uuid4()}{ext}"
     original_url = upload_file(tmp_path, object_name)
 
     clova_result = make_voice_to_stt(tmp_path)
@@ -97,8 +98,10 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
     
     # 2단계: LLM으로 문단별 분할 (part 정보를 위해)
     llm_sections = []
+    print("[DEBUG] Step 2: Classify text into sections")
     try:
         llm_sections = classify_text_into_sections(full_text)
+        print(f"[DEBUG] Step 2 Done. Sections count: {len(llm_sections)}")
     except Exception as e:
         print(f"⚠️ LLM 분할 실패: {e}")
     
@@ -106,12 +109,14 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
         progress_callback(50) # LLM 완료: 50%
 
     # 3단계: LLM 문단을 kss로 문장 단위로 분할하고 Clova word timestamps로 시간 계산
+    print("[DEBUG] Step 3: Split into sentences")
     final_segments = []
     try:
         sentence_segments = split_llm_sections_into_sentences_with_clova_timestamps(
             llm_sections=llm_sections,
             clova_words=clova_words
         )
+        print(f"[DEBUG] Step 3 Done. Segments count: {len(sentence_segments)}")
         
         # 문장 단위 segments를 final_segments에 추가
         for seg in sentence_segments:
@@ -138,9 +143,16 @@ def process_voice(db: Session, file: UploadFile, user: User, category_id: Option
 
     
     # 3단계: 나뉜 문장별로 librosa로 분석하여 metrics 계산
+    print("[DEBUG] Step 4: Librosa analysis")
     # 오디오를 한 번만 로드하여 성능 최적화
     # -------------------------------------------------------
-    y, sr = librosa.load(tmp_path, sr=16000)
+    try:
+        y, sr = librosa.load(tmp_path, sr=16000)
+        print(f"[DEBUG] Librosa loaded. sr={sr}, y_shape={y.shape}")
+    except Exception as e:
+        print(f"[ERROR] Librosa load failed: {e}")
+        raise e
+    
     frame_length = 2048
     hop_length = 256
 

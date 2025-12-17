@@ -1,28 +1,32 @@
 import os
 import tempfile
-from typing import List, Dict, Optional
+from typing import Callable, Dict, List, Optional
+
 import librosa
 import numpy as np
-from pydub import AudioSegment
 from fastapi import HTTPException
+from pydub import AudioSegment
 from sqlalchemy.orm import Session
 from starlette import status
 
+from app.domain.llm.service import make_feedback_service
+from app.domain.llm.service.stt_service import make_voice_to_stt
 from app.domain.user.model.user import User
 from app.domain.voice.model.voice import Voice, VoiceSegment, VoiceSegmentVersion
 from app.domain.voice.utils.voice_permission import verify_voice_ownership
-from app.infrastructure.storage.object_storage import upload_file, download_file
-from app.domain.llm.service.stt_service import make_voice_to_stt
-from app.domain.llm.service import make_feedback_service
+from app.infrastructure.storage.object_storage import download_file, upload_file
 from app.utils.analyzer_function import (
-    get_voiced_mask_from_words,
     compute_energy_stats_segment,
+    compute_final_boundary_features_for_segment,
     compute_pitch_cv_segment,
-    compute_final_boundary_features_for_segment
+    get_voiced_mask_from_words,
 )
 
 
-def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optional[List[Dict]] = None):
+def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optional[List[Dict]] = None, progress_callback: Optional[Callable[[int], None]] = None):
+    if progress_callback:
+        progress_callback(10)  # 시작: 10%
+
     # voice 소유권 검증
     original_voice = verify_voice_ownership(voice_id, user, db)
     
@@ -115,24 +119,44 @@ def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optiona
     out_tmp = None
 
     try:
+        downloads_count = 0
+        total_downloads = len(final_segments)
+
         for object_name in final_segments:
+            # [FIX] NamedTemporaryFile을 close() 하여 핸들 반환 (다른 프로세스/함수에서 접근 가능하도록)
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
+            tmp.close()
+            
             download_file(object_name, tmp.name)
             tmp_files.append(tmp.name)
+            
+            downloads_count += 1
+            if progress_callback:
+                 # 다운로드 구간: 10% ~ 30%
+                progress = 10 + int((downloads_count / total_downloads) * 20)
+                progress_callback(progress)
 
             try:
-                seg_audio = AudioSegment.from_file(tmp.name, format="m4a")
-            except Exception as e:
-                print(f"[WARN] 오디오 디코딩 실패 ({object_name}): {e}")
-                continue
+                # 1. 포맷 지정 없이 시도 (ffmpeg 자동 감지)
+                seg_audio = AudioSegment.from_file(tmp.name)
+            except Exception:
+                # 2. 실패 시 WebM으로 명시적 시도
+                try:
+                    seg_audio = AudioSegment.from_file(tmp.name, format="webm")
+                except Exception as e:
+                    print(f"[WARN] 오디오 디코딩 실패 ({object_name}): {e}")
+                    continue
 
             combined = seg_audio if combined is None else combined + seg_audio
-
+            
         if combined is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="모든 세그먼트 디코딩에 실패했습니다."
+                detail="모든 세그먼트 디코딩에 실패했습니다. (파일 손상 또는 다운로드 오류)"
             )
+        
+        if progress_callback:
+            progress_callback(50)  # 병합 완료: 50%
 
         out_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
         combined.export(out_tmp.name, format="mp4")  # m4a는 mp4 컨테이너로 저장
@@ -141,12 +165,18 @@ def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optiona
         object_name = f"voices/{voice_id}/final/final_{voice_id}.m4a"
         final_url = upload_file(out_tmp.name, object_name)
 
+        if progress_callback:
+            progress_callback(70)  # 업로드 완료: 70%
+
         duration_sec = len(combined) / 1000.0
         
         # 합성된 세그먼트들을 분석하여 total_feedback 생성
         total_feedback = ""
         try:
             analyzed_segments = []
+            
+            total_analysis = len(selected_segments_info)
+            
             for idx, seg_info in enumerate(selected_segments_info):
                 seg_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
                 try:
@@ -276,6 +306,12 @@ def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optiona
                         }
                     
                     analyzed_segments.append(segment_info)
+                    
+                    if progress_callback:
+                        # 분석 구간: 70% ~ 90%
+                        progress = 70 + int((idx + 1) / total_analysis * 20)
+                        progress_callback(progress)
+
                 finally:
                     if os.path.exists(seg_tmp.name):
                         os.remove(seg_tmp.name)
@@ -301,6 +337,9 @@ def synthesize_voice(voice_id: int, db: Session, user: User, selections: Optiona
         db.add(synthesized_voice)
         db.flush()
         db.commit()
+
+        if progress_callback:
+            progress_callback(100)  # 완료: 100%
 
         return {
             "voice_id": synthesized_voice.id,

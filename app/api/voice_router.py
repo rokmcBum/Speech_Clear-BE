@@ -1,20 +1,30 @@
 import asyncio
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.domain.category.model.category import Category
 from app.domain.user.model.user import User
+from app.domain.voice.service.compare_voice_feedback_service import (
+    compare_voice_feedback,
+)
+from app.domain.voice.service.delete_voice_service import delete_voice
 from app.domain.voice.service.get_my_voices_service import get_my_voices
+from app.domain.voice.service.get_voice_service import get_voice
 from app.domain.voice.service.rerecord_voice_service import re_record_segment
 from app.domain.voice.service.synthesize_voice_service import synthesize_voice
 from app.domain.voice.service.upload_voice_service import process_voice
-from app.domain.voice.service.get_my_voices_service import get_my_voices
-from app.domain.voice.service.get_voice_service import get_voice
-from app.domain.voice.service.delete_voice_service import delete_voice
-from app.domain.voice.service.compare_voice_feedback_service import compare_voice_feedback
 from app.infrastructure.db.db import get_session
 from app.utils.jwt_util import get_current_user
 
@@ -144,8 +154,21 @@ def synthesize_speech(
     }
     """
     selections = body.get("selections", [])
-    result = synthesize_voice(voice_id, db, user, selections)
-    return result
+    
+    # 진행률 콜백 함수
+    def update_progress(percentage: int):
+        progress_store[user.id] = percentage
+
+    # 초기화
+    progress_store[user.id] = 0
+
+    try:
+        result = synthesize_voice(voice_id, db, user, selections, progress_callback=update_progress)
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{voice_id}")

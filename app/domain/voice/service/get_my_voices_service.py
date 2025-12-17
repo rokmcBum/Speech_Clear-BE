@@ -1,8 +1,8 @@
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-from app.domain.voice.model.voice import Voice, VoiceSegment
 from app.domain.user.model.user import User
+from app.domain.voice.model.voice import Voice, VoiceSegment
 
 
 def get_my_voices(user: User, db: Session, category_id: int = None):
@@ -17,8 +17,11 @@ def get_my_voices(user: User, db: Session, category_id: int = None):
     Returns:
         List[Dict]: 음성 목록
     """
-    # 기본 쿼리: 사용자의 음성만 조회
-    query = db.query(Voice).filter(Voice.user_id == user.id)
+    # 기본 쿼리: 사용자의 음성만 조회 (합성된 음성 제외 - 원본만 표시)
+    query = db.query(Voice).filter(
+        Voice.user_id == user.id,
+        Voice.previous_voice_id.is_(None)
+    )
     
     # 카테고리 필터링 (선택적)
     if category_id is not None:
