@@ -1,16 +1,16 @@
 import re
 
-from app.utils.encryption import decrypt_text
-from fastapi import Form, Depends, HTTPException, APIRouter, Query
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from sqlalchemy.orm import Session
 from starlette import status
 
 from app.domain.user.model.user import User
-from app.domain.user.service.login_user_service import login
-from app.domain.user.service.register_user_service import register_user
 from app.domain.user.service.check_email_service import check_email_availability
 from app.domain.user.service.delete_user_service import delete_user
+from app.domain.user.service.login_user_service import login
+from app.domain.user.service.register_user_service import register_user
 from app.infrastructure.db.db import get_session
+from app.utils.encryption import decrypt_text
 from app.utils.jwt_util import get_current_user
 
 router = APIRouter()
@@ -83,7 +83,7 @@ async def check_email(
     return result
 
 
-@router.get("/me")
+@router.get("/user/me")
 async def get_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
@@ -92,7 +92,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
     }
 
 
-@router.delete("/me")
+@router.delete("/user/me")
 async def delete_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_session)

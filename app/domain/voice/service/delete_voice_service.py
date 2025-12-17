@@ -17,8 +17,11 @@ def delete_voice(voice_id: int, user: User, db: Session):
     - 소유권 검증 후 삭제
     - CASCADE로 segments, versions 등이 자동 삭제됨
     """
-    # voice 소유권 검증
+    # voice 소유권 검증 (여기서 voice 객체를 로드함)
     voice = verify_voice_ownership(voice_id, user, db)
+    
+    # [FIX] 이 음성을 원본으로 하는 합성 음성들(orphaned children)도 함께 삭제
+    db.query(Voice).filter(Voice.previous_voice_id == voice_id).delete()
     
     # Voice 삭제 (CASCADE로 관련 데이터 자동 삭제)
     db.delete(voice)
