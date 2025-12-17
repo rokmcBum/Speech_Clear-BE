@@ -336,7 +336,7 @@ def classify_rate_wpm(rate_wpm: float):
             "차분하고 또렷하지만 전반적으로 느린 편. 이해하기 쉬운 속도이지만, 에너지가 낮거나 "
             "흐름이 단조롭게 느껴질 수 있음. 중요한 발표에서는 강조 포인트에서 속도 조절이 필요함."
         )
-    elif rate_wpm < 190:
+    elif rate_wpm < 160:
         label = "TYPICAL"
         comment = ""
     else:
